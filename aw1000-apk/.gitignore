@@ -1,0 +1,7 @@
+# Build outputs & signing secrets (NEVER commit .jks keystores!)
+app/build/
+.gradle/
+local.properties
+*.jks
+*.keystore
+*.apk

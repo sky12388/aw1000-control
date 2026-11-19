@@ -1,0 +1,310 @@
+#!/bin/sh
+# aw1000-telemetry - read-only JSON telemetry for AW1000 Manager
+# Target: AW1000_Ultra, OpenWrt 19.07.7, BusyBox ash, FG360 (MIPC), MT7915 vendor Wi-Fi
+#
+# Modes:
+#   --full     cockpit snapshot  (wan, cell, wifi, sys, vpn, client_ip)
+#   --rf       radar snapshot    (cell only, fastest)
+#   --static   identity          (model, fw, IMEI/IMSI/ICCID, operator) - cached per boot
+#   --clients  Wi-Fi + DHCP client table
+#   --monitor  CPU/RAM/storage/thermal details
+#   --version  prints version
+#
+# Read-only: it never changes router configuration. Side effects are limited
+# to /tmp: it refreshes the vendor modem JSON caches (/tmp/modem_*.json, the
+# same thing LuCI's 3ginfo does) and keeps small caches under /tmp/aw1000-tm/.
+
+VERSION=1
+C=/tmp/aw1000-tm
+mkdir -p "$C"
+
+# ---------- JSON helpers ----------
+js() { # JSON string
+	printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr -d '\000-\037')"
+}
+num() { # JSON number or null; filters vendor sentinels
+	case "$1" in
+		''|-|*[!0-9.-]*|?*-*|268435455|2147483647|4294967295|-255|65535) printf null ;;
+		*) printf '%s' "$1" ;;
+	esac
+}
+age() { # seconds since file mtime, 9999 if missing
+	[ -e "$1" ] || { echo 9999; return; }
+	echo $(( $(date +%s) - $(date -r "$1" +%s) ))
+}
+
+# ---------- modem cache refresh ----------
+refresh_modem() { # $1 = max age seconds
+	[ "$(age /tmp/modem_cell_info.json)" -lt "$1" ] && return 0
+	(
+		flock -n 9 || exit 0
+		/bin/modem_status --cell_info >/dev/null 2>&1
+		/bin/modem_status --sign_info >/dev/null 2>&1
+		/bin/modem_status --band_info >/dev/null 2>&1
+		/bin/modem_status --ca_info   >/dev/null 2>&1
+	) 9>"$C/modem.lock"
+}
+
+# ---------- background-cached slow probes ----------
+bg_probe() { # $1 name, $2 max age, $3.. command; output cached in $C/$1
+	n="$1"; m="$2"; shift 2
+	if [ "$(age "$C/$n")" -ge "$m" ] && [ ! -e "$C/$n.run" ]; then
+		( touch "$C/$n.run"; "$@" >"$C/$n.tmp" 2>/dev/null; mv "$C/$n.tmp" "$C/$n"; rm -f "$C/$n.run" ) >/dev/null 2>&1 </dev/null &
+	fi
+	cat "$C/$n" 2>/dev/null
+}
+probe_ping() {
+	ping -c 1 -W 2 1.1.1.1 2>/dev/null | sed -n 's/.*time=\([0-9.]*\).*/\1/p'
+}
+probe_netbird() {
+	netbird status 2>/dev/null | awk -F': ' '
+		/^Management:/ {m=$2} /^Signal:/ {s=$2} /^Peers count:/ {split($2,a,"/"); p=a[1]; t=a[2]+0}
+		/^NetBird IP:/ {ip=$2} /^FQDN:/ {f=$2} /^Daemon version:/ {v=$2}
+		END { printf "%s|%s|%s|%s|%s|%s|%s", m, s, p, t, ip, f, v }'
+}
+
+# ---------- sections ----------
+cell_json() {
+	F=/tmp/modem_cell_info.json; S=/tmp/modem_signal_strength.json
+	B=/tmp/modem_band_info.json; CA=/tmp/modem_ca_info.json
+	eval "$(jsonfilter -i $F \
+		-e 'RAT=@.serving_rat' \
+		-e 'L_CID=@.nsa_lte_info[0].cid' -e 'L_ENB=@.nsa_lte_info[0].eNodeB_id' \
+		-e 'L_TAC=@.nsa_lte_info[0].tac' -e 'L_PCI=@.nsa_lte_info[0].pci' \
+		-e 'L_ARFCN=@.nsa_lte_info[0].earfcn' -e 'L_RSRP=@.nsa_lte_info[0].rsrp' \
+		-e 'L_RSRQ=@.nsa_lte_info[0].rsrq' -e 'L_SINR=@.nsa_lte_info[0].sinr' \
+		-e 'L_RSSI=@.nsa_lte_info[0].rssi' \
+		-e 'N_PCI=@.nsa_nr_info[0].pci' -e 'N_ARFCN=@.nsa_nr_info[0].nr_arfcn' \
+		-e 'N_RSRP=@.nsa_nr_info[0].rsrp' -e 'N_RSRQ=@.nsa_nr_info[0].rsrq' \
+		-e 'N_SINR=@.nsa_nr_info[0].sinr' -e 'N_TA=@.nsa_nr_info[0].ta' 2>/dev/null)"
+	# Non-NSA serving cells (LTE-only / SA)
+	case "$RAT" in
+		LTE) eval "$(jsonfilter -i $F -e 'L_CID=@.lte_info[0].cid' -e 'L_TAC=@.lte_info[0].tac' \
+			-e 'L_PCI=@.lte_info[0].pci' -e 'L_ARFCN=@.lte_info[0].earfcn' -e 'L_RSRP=@.lte_info[0].rsrp' \
+			-e 'L_RSRQ=@.lte_info[0].rsrq' -e 'L_SINR=@.lte_info[0].sinr' 2>/dev/null)" ;;
+		NR-SA) eval "$(jsonfilter -i $F -e 'N_CID=@.sa_info[0].cid' -e 'L_TAC=@.sa_info[0].tac' \
+			-e 'N_PCI=@.sa_info[0].pci' -e 'N_ARFCN=@.sa_info[0].nr_arfcn' -e 'N_RSRP=@.sa_info[0].rsrp' \
+			-e 'N_RSRQ=@.sa_info[0].rsrq' -e 'N_SINR=@.sa_info[0].sinr' -e 'N_TA=@.sa_info[0].ta' 2>/dev/null)" ;;
+	esac
+	eval "$(jsonfilter -i $B \
+		-e 'L_BAND=@.lte_band' -e 'L_BW=@.lte_dl_bandwidth' -e 'L_CQI=@.lte_cqi' \
+		-e 'N_BAND=@.nr_band' -e 'N_BW=@.nr_dl_bandwidth' -e 'N_CQI=@.nr_cqi' 2>/dev/null)"
+	eval "$(jsonfilter -i $CA -e 'L_SCC=@.lte_scc_num' -e 'N_SCC=@.nr_scc_num' \
+		-e 'L_TXP=@.lte_pcc_info[0].lte_pcc_pusch_tx_pwr' -e 'N_TXP=@.nr_pcc_info[0].nr_pcc_pusch_tx_pwr' 2>/dev/null)"
+	# per-antenna chains
+	LR="$(jsonfilter -i $S -e '@.lte_cc_info[0].rsrp_rx0' -e '@.lte_cc_info[0].rsrp_rx1' \
+		-e '@.lte_cc_info[0].rsrp_rx2' -e '@.lte_cc_info[0].rsrp_rx3' 2>/dev/null)"
+	NR="$(jsonfilter -i $S -e '@.nr_info[0].nr_cc_info[0].ssb_rsrp_rx0' -e '@.nr_info[0].nr_cc_info[0].ssb_rsrp_rx1' \
+		-e '@.nr_info[0].nr_cc_info[0].ssb_rsrp_rx2' -e '@.nr_info[0].nr_cc_info[0].ssb_rsrp_rx3' 2>/dev/null)"
+	arr() { printf '['; f=1; for v in $1; do [ $f = 1 ] || printf ','; f=0; num "$v"; done; printf ']'; }
+
+	printf '{"rat":%s,"age":%s,' "$(js "$RAT")" "$(age $F)"
+	printf '"lte":{"band":%s,"bw":%s,"pci":%s,"arfcn":%s,"cid":%s,"enb":%s,"tac":%s,"rsrp":%s,"rsrq":%s,"sinr":%s,"rssi":%s,"cqi":%s,"scc":%s,"chains":%s},' \
+		"$(num "$L_BAND")" "$(js "$L_BW")" "$(num "$L_PCI")" "$(num "$L_ARFCN")" "$(num "$L_CID")" "$(num "$L_ENB")" \
+		"$(num "$L_TAC")" "$(num "$L_RSRP")" "$(num "$L_RSRQ")" "$(num "$L_SINR")" "$(num "$L_RSSI")" \
+		"$(num "$L_CQI")" "$(num "$L_SCC")" "$(arr "$LR")"
+	printf '"nr":{"band":%s,"bw":%s,"pci":%s,"arfcn":%s,"rsrp":%s,"rsrq":%s,"sinr":%s,"cqi":%s,"scc":%s,"ta":%s,"txp":%s,"chains":%s}}' \
+		"$(num "$N_BAND")" "$(js "$N_BW")" "$(num "$N_PCI")" "$(num "$N_ARFCN")" "$(num "$N_RSRP")" \
+		"$(num "$N_RSRQ")" "$(num "$N_SINR")" "$(num "$N_CQI")" "$(num "$N_SCC")" "$(num "$N_TA")" \
+		"$(num "$N_TXP")" "$(arr "$NR")"
+}
+
+wan_json() {
+	WIF="$(ip route show default 2>/dev/null | awk '{for(i=1;i<NF;i++) if($i=="dev"){print $(i+1); exit}}')"
+	[ -n "$WIF" ] || WIF=ccmni2
+	IP4="$(ip -4 addr show dev "$WIF" 2>/dev/null | awk '/inet /{split($2,a,"/"); print a[1]; exit}')"
+	IP6="$(ip -6 addr show dev "$WIF" scope global 2>/dev/null | awk '/inet6 /{split($2,a,"/"); print a[1]; exit}')"
+	RX="$(cat /sys/class/net/$WIF/statistics/rx_bytes 2>/dev/null)"
+	TX="$(cat /sys/class/net/$WIF/statistics/tx_bytes 2>/dev/null)"
+	UP_S="$(ubus call network.interface.wan status 2>/dev/null | jsonfilter -e '@.uptime' 2>/dev/null)"
+	PING="$(bg_probe ping 5 probe_ping)"
+	printf '{"if":%s,"ip4":%s,"ip6":%s,"up_s":%s,"rx":%s,"tx":%s,"ping_ms":%s}' \
+		"$(js "$WIF")" "$(js "$IP4")" "$(js "$IP6")" "$(num "$UP_S")" "$(num "$RX")" "$(num "$TX")" "$(num "${PING%%.*}")"
+}
+
+sta_count() { # count associated stations in vendor MAC table file
+	[ -r "$1" ] || { echo 0; return; }
+	c="$(grep -cE '^[0-9a-f]{2}(:[0-9a-f]{2}){5}STA' "$1" 2>/dev/null)"
+	echo "${c:-0}"
+}
+dat() { grep -m1 "^$2=" "$1" 2>/dev/null | cut -d= -f2-; }
+wifi_json() {
+	W=/etc/wireless/mediatek
+	printf '{'
+	f=1
+	for pair in ra0:mt7915.1.dat rai0:mt7915.2.dat; do
+		ifc="${pair%%:*}"; d="$W/${pair#*:}"
+		[ $f = 1 ] || printf ','; f=0
+		up=0; [ "$(cat /sys/class/net/$ifc/operstate 2>/dev/null)" = up ] && up=1
+		printf '"%s":{"up":%s,"radio":%s,"ssid":%s,"ch":%s,"ht_bw":%s,"vht_bw":%s,"hidden":%s,"acl":%s,"clients":%s,"tbl_age":%s}' \
+			"$ifc" "$up" "$(num "$(dat $d RadioOn)")" "$(js "$(dat $d SSID1)")" "$(num "$(dat $d Channel)")" \
+			"$(num "$(dat $d HT_BW)")" "$(num "$(dat $d VHT_BW)")" "$(num "$(dat $d HideSSID)")" \
+			"$(num "$(dat $d AccessPolicy0)")" "$(sta_count /data/mac_table_file_$ifc)" "$(age /data/mac_table_file_$ifc)"
+	done
+	printf '}'
+}
+
+thermal() { # $1 zone type -> degrees C (1 decimal)
+	for z in /sys/class/thermal/thermal_zone*; do
+		[ "$(cat $z/type 2>/dev/null)" = "$1" ] && { awk '{printf "%.1f", $1/1000}' $z/temp; return; }
+	done
+}
+sys_json() {
+	set -- $(head -1 /proc/stat)   # cpu user nice system idle iowait irq softirq steal
+	CT=$(( $2 + $3 + $4 + $5 + $6 + $7 + $8 + $9 )); CI=$(( $5 + $6 ))
+	eval "$(awk '/^MemTotal:/{print "MT="$2} /^MemAvailable:/{print "MA="$2}' /proc/meminfo)"
+	UP="$(cut -d. -f1 /proc/uptime)"
+	printf '{"cpu_total":%s,"cpu_idle":%s,"mem_total_kb":%s,"mem_avail_kb":%s,"uptime_s":%s,"t_soc":%s,"t_md5g":%s,"t_md4g":%s,"t_nrpa":%s,"t_ltepa":%s}' \
+		"$CT" "$CI" "$(num "$MT")" "$(num "$MA")" "$(num "$UP")" \
+		"$(num "$(thermal soc_max)")" "$(num "$(thermal md_5g)")" "$(num "$(thermal md_4g)")" \
+		"$(num "$(thermal nrpa_ntc)")" "$(num "$(thermal ltepa_ntc)")"
+}
+
+vpn_json() {
+	NB="$(bg_probe netbird 10 probe_netbird)"
+	IFS='|' read -r NB_M NB_S NB_P NB_T NB_IP NB_F NB_V <<-EOF
+	$NB
+	EOF
+	NB_RUN=0; pidof netbird >/dev/null 2>&1 && NB_RUN=1
+	NB_EN=0; /etc/init.d/netbird enabled 2>/dev/null && NB_EN=1
+	TS_RUN=0; pidof tailscaled >/dev/null 2>&1 && TS_RUN=1
+	TS_EN=0; /etc/init.d/tailscale enabled 2>/dev/null && TS_EN=1
+	TS_IP="$(ip -4 addr show dev tailscale0 2>/dev/null | awk '/inet /{split($2,a,"/"); print a[1]; exit}')"
+	TS_ENR=0; [ -s /etc/tailscale/tailscaled.state ] && TS_ENR=1
+	DM="$(cat /tmp/aw1000-deadman/status 2>/dev/null)"
+	printf '{"netbird":{"running":%s,"enabled":%s,"mgmt":%s,"signal":%s,"peers":%s,"peers_total":%s,"ip":%s,"fqdn":%s,"ver":%s},' \
+		"$NB_RUN" "$NB_EN" "$(js "$NB_M")" "$(js "$NB_S")" "$(num "$NB_P")" "$(num "$NB_T")" \
+		"$(js "${NB_IP%%/*}")" "$(js "$NB_F")" "$(js "$NB_V")"
+	printf '"tailscale":{"running":%s,"enabled":%s,"enrolled":%s,"ip":%s,"fw_mode":%s},"deadman":%s}' \
+		"$TS_RUN" "$TS_EN" "$TS_ENR" "$(js "$TS_IP")" "$(js "$(uci -q get tailscale.settings.fw_mode)")" "$(js "$DM")"
+}
+
+client_ip() { echo "${SSH_CLIENT%% *}"; }
+
+# ---------- monitor (cpu / ram / storage / thermal) ----------
+mount_json() { # $1 key, $2 mountpoint
+	set -- "$1" "$2" $(df -k "$2" 2>/dev/null | awk 'NR==2{print $2, $3, $4}')
+	[ -n "$3" ] || { printf '"%s":null' "$1"; return; }
+	printf '"%s":{"mount":%s,"total_kb":%s,"used_kb":%s,"avail_kb":%s}' "$1" "$(js "$2")" "$3" "$4" "$5"
+}
+monitor_json() {
+	# per-core: cumulative jiffies (app diffs them) + current/max freq (kHz)
+	printf '{"cores":['
+	f=1
+	grep -E '^cpu[0-9]' /proc/stat | while read -r n u ni s i io irq sirq st rest; do
+		k=${n#cpu}; T=$(( u + ni + s + i + io + irq + sirq + st )); I=$(( i + io ))
+		[ $f = 1 ] || printf ','; f=0
+		printf '{"id":%s,"total":%s,"idle":%s,"cur_khz":%s,"max_khz":%s}' "$k" "$T" "$I" \
+			"$(num "$(cat /sys/devices/system/cpu/cpu$k/cpufreq/scaling_cur_freq 2>/dev/null)")" \
+			"$(num "$(cat /sys/devices/system/cpu/cpu$k/cpufreq/scaling_max_freq 2>/dev/null)")"
+	done
+	printf '],"governor":%s,"load":%s,' "$(js "$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null)")" \
+		"$(js "$(cut -d' ' -f1-3 /proc/loadavg)")"
+	# memory
+	eval "$(awk '/^(MemTotal|MemFree|MemAvailable|Buffers|Cached|SwapTotal|SwapFree):/{gsub(":","",$1); print $1"="$2}' /proc/meminfo)"
+	printf '"mem":{"total_kb":%s,"free_kb":%s,"avail_kb":%s,"buffers_kb":%s,"cached_kb":%s,"swap_total_kb":%s,"swap_free_kb":%s},' \
+		"$(num "$MemTotal")" "$(num "$MemFree")" "$(num "$MemAvailable")" "$(num "$Buffers")" "$(num "$Cached")" \
+		"$(num "$SwapTotal")" "$(num "$SwapFree")"
+	# top 5 processes by RSS (VmRSS kB)
+	printf '"top_mem":['
+	for p in /proc/[0-9]*; do
+		r=$(awk '/^VmRSS:/{print $2}' $p/status 2>/dev/null); [ -n "$r" ] && echo "$r $(cat $p/comm 2>/dev/null)"
+	done | sort -rn | head -5 | awk 'BEGIN{f=1} {if(!f)printf ","; f=0; gsub(/"/,"",$2); printf "{\"rss_kb\":%s,\"name\":\"%s\"}", $1, $2}'
+	printf '],'
+	# storage
+	printf '"storage":{%s,%s,%s,%s,' "$(mount_json overlay /overlay)" "$(mount_json tmp /tmp)" \
+		"$(mount_json usb /mnt/sda1)" "$(mount_json nvdata /mnt/vendor/nvdata)"
+	USBM="$(cat /sys/block/sda/device/vendor 2>/dev/null | tr -s ' ') $(cat /sys/block/sda/device/model 2>/dev/null | tr -s ' ')"
+	USBFS="$(awk '$2=="/mnt/sda1"{print $3}' /proc/mounts)"
+	SYSLOG_KB="$(du -sk /data/syslog.log* 2>/dev/null | awk '{s+=$1} END{print s+0}')"
+	printf '"usb_model":%s,"usb_fs":%s,"emmc_life":%s,"emmc_eol":%s,"syslog_kb":%s},' \
+		"$(js "$USBM")" "$(js "$USBFS")" "$(js "$(cat /sys/block/mmcblk0/device/life_time 2>/dev/null)")" \
+		"$(js "$(cat /sys/block/mmcblk0/device/pre_eol_info 2>/dev/null)")" "$(num "$SYSLOG_KB")"
+	# thermal (this board has no battery / power_supply, so no power section)
+	printf '"thermal":{'
+	f=1
+	for z in /sys/class/thermal/thermal_zone*; do
+		t=$(cat $z/temp 2>/dev/null); case "$t" in ''|-*) continue ;; esac
+		[ $f = 1 ] || printf ','; f=0
+		printf '"%s":%s' "$(cat $z/type)" "$(awk -v t=$t 'BEGIN{printf "%.1f", t/1000}')"
+	done
+	printf '},"trips_c":[85,95,115],"uptime_s":%s}' "$(cut -d. -f1 /proc/uptime)"
+}
+
+static_json() {
+	if [ -s "$C/static.json" ]; then cat "$C/static.json"; return; fi
+	at() { /bin/modem_status --run_atcmd "$1" 2>/dev/null | tr -d '\r'; }
+	IMEI="$(at 'AT+EGMR=0,7' | grep -oE '[0-9]{15}' | head -1)"
+	IMSI="$(at 'AT+CIMI' | grep -oE '[0-9]{14,15}' | head -1)"
+	ICCID="$(at 'AT+ICCID' | grep -oE '[0-9]{18,20}[0-9A-Fa-f]?' | head -1)"
+	MFW="$(at 'AT+GMR' | grep -vE '^(AT|stop|OK|$)|command' | head -1)"
+	MMOD="$(at 'AT+CGMM' | grep -vE '^(AT|stop|OK|$)|command' | head -1)"
+	PLMN="$(jsonfilter -i /tmp/modem_cell_info.json -e '@.nsa_lte_info[0].plmn' -e '@.lte_info[0].plmn' -e '@.sa_info[0].plmn' 2>/dev/null | head -1)"
+	[ -n "$PLMN" ] || PLMN="${IMSI:0:5}"
+	MCC="${PLMN:0:3}"; MNC="${PLMN:3}"
+	OP="$(awk -F';' -v p="$PLMN" '$1==p{print $3; exit}' /usr/share/3ginfo-lite/mccmnc.dat 2>/dev/null)"
+	. /etc/openwrt_release 2>/dev/null
+	{
+		printf '{"v":%s,"model":%s,"hostname":%s,"openwrt":%s,"kernel":%s,' \
+			"$VERSION" "$(js "$(cat /tmp/sysinfo/model 2>/dev/null)")" "$(js "$(cat /proc/sys/kernel/hostname)")" \
+			"$(js "$DISTRIB_DESCRIPTION")" "$(js "$(uname -r)")"
+		printf '"modem":%s,"modem_fw":%s,"imei":%s,"imsi":%s,"iccid":%s,"apn":%s,"op":%s,"mcc":%s,"mnc":%s}' \
+			"$(js "$MMOD")" "$(js "$MFW")" "$(js "$IMEI")" "$(js "$IMSI")" "$(js "$ICCID")" \
+			"$(js "$(uci -q get network.wan.apn)")" "$(js "$OP")" "$(js "$MCC")" "$(js "$MNC")"
+	} >"$C/static.tmp"
+	# only cache if the modem actually answered
+	if [ -n "$IMEI" ]; then mv "$C/static.tmp" "$C/static.json"; cat "$C/static.json"; else cat "$C/static.tmp"; fi
+}
+
+clients_json() {
+	LEASES=/tmp/dhcp.leases
+	printf '{"ts":%s,"client_ip":%s,"clients":[' "$(date +%s)" "$(js "$(client_ip)")"
+	first=1
+	for ifc in ra0 rai0; do
+		band=2.4; [ $ifc = rai0 ] && band=5
+		awk -v ifc=$ifc -v band=$band '
+			/^[0-9a-f][0-9a-f](:[0-9a-f][0-9a-f]){5}STA/ {
+				mac=substr($1,1,17); rssi=$7; split(rssi, r, "/"); best=-127
+				for (i in r) if (r[i]+0 < 0 && r[i]+0 > best) best=r[i]+0
+				split($9, rt, "/"); getline nxt; split(nxt, n, " ")
+				printf "%s %s %s %s %s %s %s\n", mac, ifc, band, best, rt[1]+0, rt[2]+0, n[2]
+			}' /data/mac_table_file_$ifc 2>/dev/null
+	done >"$C/sta.txt"
+	# Wi-Fi stations first (joined with DHCP), then wired/other leases
+	while read -r mac ifc band rssi txr rxr bw; do
+		set -- $(awk -v m="$mac" 'tolower($2)==m {print $3, $4; exit}' $LEASES 2>/dev/null)
+		ip="$1"; name="$2"; [ "$name" = "*" ] && name=""
+		[ $first = 1 ] || printf ','; first=0
+		printf '{"mac":%s,"ip":%s,"name":%s,"iface":%s,"band":%s,"rssi":%s,"tx_rate":%s,"rx_rate":%s,"bw":%s,"wifi":true}' \
+			"$(js "$mac")" "$(js "$ip")" "$(js "$name")" "$(js "$ifc")" "$(js "$band")" \
+			"$(num "$rssi")" "$(num "$txr")" "$(num "$rxr")" "$(js "$bw")"
+	done <"$C/sta.txt"
+	while read -r exp mac ip name rest; do
+		grep -qi "^$mac " "$C/sta.txt" && continue
+		[ "$name" = "*" ] && name=""
+		reach=false; ip neigh show "$ip" 2>/dev/null | grep -qE 'REACHABLE|DELAY|PROBE' && reach=true
+		[ $first = 1 ] || printf ','; first=0
+		printf '{"mac":%s,"ip":%s,"name":%s,"lease_exp":%s,"reachable":%s,"wifi":false}' \
+			"$(js "$mac")" "$(js "$ip")" "$(js "$name")" "$(num "$exp")" "$reach"
+	done <"$LEASES"
+	printf ']}'
+}
+
+# ---------- main ----------
+case "$1" in
+	--version) echo "$VERSION" ;;
+	--rf)
+		refresh_modem 1
+		printf '{"v":%s,"ts":%s,"cell":%s}\n' "$VERSION" "$(date +%s)" "$(cell_json)" ;;
+	--static) static_json; echo ;;
+	--clients) clients_json; echo ;;
+	--monitor)
+		refresh_modem 3
+		printf '{"v":%s,"ts":%s,"mon":%s}\n' "$VERSION" "$(date +%s)" "$(monitor_json)" ;;
+	--full|"")
+		refresh_modem 3
+		printf '{"v":%s,"ts":%s,"client_ip":%s,"wan":%s,"cell":%s,"wifi":%s,"sys":%s,"vpn":%s}\n' \
+			"$VERSION" "$(date +%s)" "$(js "$(client_ip)")" "$(wan_json)" "$(cell_json)" \
+			"$(wifi_json)" "$(sys_json)" "$(vpn_json)" ;;
+	*) echo "usage: $0 --full|--rf|--static|--clients|--monitor|--version" >&2; exit 2 ;;
+esac

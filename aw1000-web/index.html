@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AW1000 Control — Modern 5G Telemetry PWA &amp; Android App for AW1000 Ultra</title>
+  <meta name="description" content="Lightweight, RGB-accented OpenWrt PWA and 645 KB native Android WebView app for the Arcadyan / Telstra AW1000 Ultra 5G router. Local LAN and Remote VPN ready."/>
+  <link rel="stylesheet" href="./styles.css"/>
+</head>
+<body>
+
+  <!-- Top Navigation -->
+  <header class="nav">
+    <div class="container nav-inner">
+      <a class="brand" href="#">
+        <div class="brand-icon" aria-hidden="true">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="14" r="2.2" fill="#FFFFFF"/>
+            <path d="M8.5 11a5 5 0 0 1 7 0M5.5 8a9 9 0 0 1 13 0" stroke="#FFFFFF" stroke-width="2.1" stroke-linecap="round"/>
+            <rect x="7" y="18.5" width="10" height="2.6" rx="1.3" fill="#00E676"/>
+          </svg>
+        </div>
+        <span class="brand-name">AW1000 Control <span class="badge mono" style="margin-left:6px;font-size:0.70rem;">v1.0.4</span></span>
+      </a>
+      <nav class="nav-links">
+        <a class="hide-sm" href="#features">Features</a>
+        <a href="#downloads">Downloads</a>
+        <a href="#install">Install</a>
+        <a href="#support">Support</a>
+        <a class="btn btn-ghost" style="min-height:38px;padding:6px 14px;font-size:0.83rem;"
+           href="https://github.com/eddiealexander77/aw1000-control" target="_blank" rel="noopener">
+          GitHub ↗
+        </a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- Hero & Interactive Live 10-Bar Signal Preview -->
+    <section class="hero">
+      <div>
+        <div class="eyebrow">OpenWrt · Fibocom FG360 · MT7915 Dual-Band</div>
+        <h1>Supercharged 5G Control for Your <span class="text-rgb">AW1000 Ultra</span></h1>
+        <p class="hero-desc">
+          A blazing-fast 33 KB Progressive Web App hosted directly on your router plus a 645 KB native
+          Android companion APK. Monitor 5G/LTE Carrier Aggregation, align antennas by ear, manage TTL
+          spoofing, IMEI, Wi-Fi channels, and MAC ACLs — locally on LAN or remotely over NetBird, Tailscale,
+          or WireGuard.
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-green" href="https://github.com/eddiealexander77/aw1000-control/releases/download/v1.0.4/AW1000-Control-v1.0.4.apk">
+            ↓ Download Android APK (645 KB)
+          </a>
+          <a class="btn btn-primary" href="#install">
+            1-Command Router Install
+          </a>
+        </div>
+        <div class="hero-stats">
+          <span><strong>33.5 KB</strong> gzipped PWA</span>
+          <span>·</span>
+          <span><strong>645 KB</strong> signed APK</span>
+          <span>·</span>
+          <span><strong>Read-Only</strong> by default</span>
+          <span>·</span>
+          <span><strong>Zero</strong> cloud relays</span>
+        </div>
+      </div>
+
+      <!-- Interactive 10-Tier Signal Bar Preview Card -->
+      <div class="rgb-frame">
+        <div class="preview-card">
+          <div class="preview-head">
+            <div>
+              <span style="font-size:0.74rem;font-weight:800;color:#FF6B84;text-transform:uppercase;letter-spacing:0.06em;">
+                5G NR-NSA · n78 (100M) + B28 (20M)
+              </span>
+              <div id="previewPct" class="pct-big tabular" style="color:#00E676;">100%</div>
+            </div>
+            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
+              <span id="previewLabel" class="badge">Excellent Signal · Bar 10/10</span>
+              <button id="previewBeepBtn" class="btn btn-signal" style="min-height:34px;padding:4px 12px;font-size:0.76rem;">
+                🔊 Test Alignment Beeper
+              </button>
+            </div>
+          </div>
+
+          <div id="previewBars" class="bars-stage" aria-label="10-tier signal bar preview"></div>
+
+          <div class="mini-metrics tabular">
+            <div class="mini-stat">
+              <span>5G NR RSRP</span>
+              <strong id="previewRsrp">-78 dBm</strong>
+            </div>
+            <div class="mini-stat">
+              <span>5G NR SINR</span>
+              <strong id="previewSinr">30 dB</strong>
+            </div>
+            <div class="mini-stat">
+              <span>Tower Distance</span>
+              <strong id="previewDist">156 m (TA 4)</strong>
+            </div>
+          </div>
+
+          <div class="slider-row">
+            <span>Slide Signal Tier (10% → 100%):</span>
+            <input id="signalSlider" type="range" min="1" max="10" value="10" aria-label="Preview signal strength tier"/>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Key Highlights -->
+    <section id="features" class="section">
+      <div class="section-head">
+        <h2>Built for Real 5G RF Tuning &amp; Remote Safety</h2>
+        <p>Every feature runs directly on your AW1000 router with zero external cloud servers and strict lifeline protection for SSH, NetBird, Tailscale, and your firewall.</p>
+      </div>
+      <div class="grid-4">
+        <article class="card">
+          <div class="card-top-bar signal"></div>
+          <h3>10-Tier Signal Meter + Beeper</h3>
+          <p>Instant 10%–100% phone-style vertical signal bars paired with Web Audio pitch/cadence beeps &amp; haptic pulses for hands-free antenna alignment.</p>
+        </article>
+        <article class="card">
+          <div class="card-top-bar net"></div>
+          <h3>5G CA &amp; Tower Distance</h3>
+          <p>Live Fibocom FG360 NR-NSA / SA telemetry, PCI, Cell ID, real-time ICMP ping monitor, and estimated tower distance from Timing Advance (TA).</p>
+        </article>
+        <article class="card">
+          <div class="card-top-bar wifi"></div>
+          <h3>IMEI, TTL &amp; MAC Anti-Lockout</h3>
+          <p>15-digit IMEI Luhn validator &amp; generator, persistent IPv4/IPv6 TTL/HL spoofing presets, and 1-tap Wi-Fi MAC Blacklist with Admin Anti-Lockout Guard.</p>
+        </article>
+        <article class="card">
+          <div class="card-top-bar signal"></div>
+          <h3>Read-Only Guard &amp; Backups</h3>
+          <p>Read-only by default. Destructive actions require rpcd login + Impact Confirmation Sheets and create automatic backups before editing `.dat` files.</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- Direct Release Downloads -->
+    <section id="downloads" class="section">
+      <div class="section-head">
+        <h2>Direct Release Downloads (<code class="mono">v1.0.4</code>)</h2>
+        <p>Verified artifacts hosted on GitHub Releases. Install the router package once, then manage from any browser or the 645 KB Android app.</p>
+      </div>
+
+      <div class="grid-2">
+        <article class="card">
+          <div class="card-top-bar net"></div>
+          <h3>1. Router Installer (Telstra / Arcadyan AW1000 Ultra)</h3>
+          <p>
+            Installs the PWA at <code class="mono">/www/app/</code>, native Lua JSON-RPC gateway at
+            <code class="mono">/www/cgi-bin/ubus</code>, and least-privilege <code class="mono">rpcd</code> plugin
+            without modifying SSH, VPNs, or <code class="mono">/etc/firewall.user</code>.
+          </p>
+          <div class="dl-list">
+            <a class="btn btn-primary" href="https://github.com/eddiealexander77/aw1000-control/releases/download/v1.0.4/aw1000-control_1.0.4_all.ipk">
+              ↓ OpenWrt .ipk (63 KB)
+            </a>
+            <a class="btn btn-ghost" href="https://github.com/eddiealexander77/aw1000-control/releases/download/v1.0.4/aw1000-control-router-v1.0.4.tar.gz">
+              ↓ Router .tar.gz (62 KB)
+            </a>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="card-top-bar wifi"></div>
+          <h3>2. Android Companion App (<code class="mono">AW1000-Control-v1.0.4.apk</code>)</h3>
+          <p>
+            Ultra-lightweight <strong>645 KB</strong> native Kotlin WebView wrapper with an in-app Local LAN &amp;
+            Remote VPN IP switcher, scoped self-signed HTTPS handling (zero browser cert warnings), Web Audio
+            beeper, hardware vibration, and direct <code class="mono">.tar.gz</code> backup downloads.
+          </p>
+          <div class="dl-list">
+            <a class="btn btn-green" href="https://github.com/eddiealexander77/aw1000-control/releases/download/v1.0.4/AW1000-Control-v1.0.4.apk">
+              ↓ Download Android APK (645 KB)
+            </a>
+            <a class="btn btn-ghost" href="https://github.com/eddiealexander77/aw1000-control/releases/download/v1.0.4/SHA256SUMS.txt">
+              SHA256SUMS.txt
+            </a>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- Multi-OS 1-Command Installation Tabs -->
+    <section id="install" class="section">
+      <div class="section-head">
+        <h2>1-Command Router Installation</h2>
+        <p>Pick your operating system below to SSH into your AW1000 router and install in under 15 seconds.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-top-bar net"></div>
+        <div class="os-tabs" role="tablist">
+          <button class="os-tab active" data-os="windows" role="tab">Windows</button>
+          <button class="os-tab" data-os="macos" role="tab">macOS</button>
+          <button class="os-tab" data-os="linux" role="tab">Linux</button>
+          <button class="os-tab" data-os="termux" role="tab">Android / Termux</button>
+        </div>
+
+        <h3 id="osTitle">Windows 10 / 11 (PowerShell or Windows Terminal)</h3>
+        <p id="osStep1">1. Connect your PC to the AW1000 Wi-Fi or LAN cable, open PowerShell, and log in:</p>
+        <div class="code-box">
+          <pre id="osSshCmd" class="mono">ssh root@192.168.1.1</pre>
+          <button class="copy-btn" data-copy-target="osSshCmd">Copy</button>
+        </div>
+
+        <p id="osStep2" style="margin-top:6px;">2. Once logged into the router, paste this 1-command installer:</p>
+        <div class="code-box">
+          <pre id="universalInstallCmd" class="mono">wget -qO /tmp/aw1000-control-router-v1.0.4.tar.gz https://github.com/eddiealexander77/aw1000-control/releases/download/v1.0.4/aw1000-control-router-v1.0.4.tar.gz &amp;&amp; wget -qO /tmp/install.sh https://github.com/eddiealexander77/aw1000-control/releases/download/v1.0.4/install.sh &amp;&amp; sh /tmp/install.sh /tmp/aw1000-control-router-v1.0.4.tar.gz</pre>
+          <button class="copy-btn" data-copy-target="universalInstallCmd">Copy</button>
+        </div>
+
+        <p style="margin-top:6px;">Or install via OpenWrt <code class="mono">opkg</code>:</p>
+        <div class="code-box">
+          <pre id="opkgInstallCmd" class="mono">wget -qO /tmp/aw1000-control_1.0.4_all.ipk https://github.com/eddiealexander77/aw1000-control/releases/download/v1.0.4/aw1000-control_1.0.4_all.ipk &amp;&amp; opkg install /tmp/aw1000-control_1.0.4_all.ipk</pre>
+          <button class="copy-btn" data-copy-target="opkgInstallCmd">Copy</button>
+        </div>
+
+        <div class="mini-stat" style="padding:13px 15px;margin-top:4px;">
+          <span style="font-size:0.78rem;color:#34D399;">Cross-Platform Browser Access</span>
+          <p style="margin-top:4px;font-size:0.86rem;color:var(--text-secondary);">
+            <strong>Windows, macOS, Linux, and iOS</strong> users don't even need an app — just open
+            <code class="mono" style="color:var(--text-primary);">https://192.168.1.1/app/</code> (or your VPN IP)
+            directly in Chrome, Edge, Firefox, or Safari.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Humorous Community Support Section ("Fuel the Developer") -->
+    <section id="support" class="section">
+      <div class="section-head">
+        <h2>Fuel the Developer</h2>
+        <p>AW1000 Control is 100% free and open source. If it saved you a trip up the ladder or squeezed an extra 200 Mbps out of band n78, feel free to chip in!</p>
+      </div>
+
+      <div class="grid-4">
+        <article class="card">
+          <div class="card-top-bar wifi"></div>
+          <div class="tier-price text-rgb">$3</div>
+          <h3>Teh Tarik &amp; Roti Canai</h3>
+          <p>Fuel for midnight debugging &amp; 5G packet optimization.</p>
+          <div class="dl-list">
+            <a class="btn btn-ghost" style="width:100%;" href="https://ko-fi.com/eddiealexander77" target="_blank" rel="noopener">
+              ☕ Buy Teh Tarik
+            </a>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="card-top-bar net"></div>
+          <div class="tier-price text-rgb">$50</div>
+          <h3>Superbike Fund</h3>
+          <p>Upgrade two-wheel dreams to match n78 speeds.</p>
+          <div class="dl-list">
+            <a class="btn btn-ghost" style="width:100%;" href="https://ko-fi.com/eddiealexander77" target="_blank" rel="noopener">
+              🏍️ Rev the Fund
+            </a>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="card-top-bar signal"></div>
+          <div class="tier-price text-rgb">$250</div>
+          <h3>Sports Car</h3>
+          <p>Aerodynamic downforce for days when signal hits 100% bright green.</p>
+          <div class="dl-list">
+            <a class="btn btn-ghost" style="width:100%;" href="https://ko-fi.com/eddiealexander77" target="_blank" rel="noopener">
+              🏎️ Sponsor Downforce
+            </a>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="card-top-bar signal"></div>
+          <div class="tier-price text-rgb">$1,000+</div>
+          <h3>Mansion</h3>
+          <p>Comes with a private 5G macro tower on the roof so nobody ever climbs a ladder again.</p>
+          <div class="dl-list">
+            <a class="btn btn-signal" style="width:100%;" href="https://ko-fi.com/eddiealexander77" target="_blank" rel="noopener">
+              🏰 Fund the Macro Tower
+            </a>
+          </div>
+        </article>
+      </div>
+
+      <!-- Dedicated DuitNow QR Card for Malaysia & ASEAN -->
+      <div class="duitnow-card">
+        <div style="flex:1 1 280px;">
+          <span class="badge" style="border-color:rgba(236,72,153,0.45);color:#F472B6;margin-bottom:10px;">
+            Malaysia &amp; ASEAN · Zero-Fee Instant Transfer
+          </span>
+          <h3 style="font-size:1.3rem;margin-bottom:8px;">Support Instantly via DuitNow QR</h3>
+          <p style="color:var(--text-secondary);font-size:0.92rem;max-width:54ch;">
+            Scan with any Malaysian banking app, Touch 'n Go eWallet, GrabPay, MAE, or ASEAN cross-border
+            QR-compatible app (Singapore PayNow, Thailand PromptPay, Indonesia QRIS).
+          </p>
+        </div>
+        <div class="duitnow-qr-wrap">
+          <img src="./assets/duitnow-qr.png" alt="DuitNow QR Code for AW1000 Control developer support"/>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="footer">
+    <div class="container">
+      <p>
+        <strong>AW1000 Control v1.0.4</strong> · Open-Source OpenWrt Telemetry PWA &amp; Android Companion ·
+        <a href="https://github.com/eddiealexander77/aw1000-control" target="_blank" rel="noopener">github.com/eddiealexander77/aw1000-control</a>
+      </p>
+    </div>
+  </footer>
+
+  <script src="./app.js"></script>
+</body>
+</html>

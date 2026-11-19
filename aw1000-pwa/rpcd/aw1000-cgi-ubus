@@ -1,0 +1,140 @@
+#!/usr/bin/lua
+-- ============================================================================
+-- /www/cgi-bin/ubus — JSON-RPC 2.0 over HTTP Gateway for AW1000 Control PWA
+-- Uses native OpenWrt Lua `ubus` and `luci.jsonc` (no uhttpd_ubus.so required)
+-- Enforces rpcd ACLs and Hard Rule #1 (blocks any dropbear/netbird/tailscale/firewall write)
+-- ============================================================================
+
+local ubus = require("ubus")
+local jsonc = require("luci.jsonc")
+
+local function send_json(status, tbl)
+  io.write("Status: " .. status .. "\r\n")
+  io.write("Content-Type: application/json; charset=utf-8\r\n")
+  io.write("Access-Control-Allow-Origin: *\r\n")
+  io.write("Access-Control-Allow-Methods: POST, OPTIONS\r\n")
+  io.write("Access-Control-Allow-Headers: Content-Type\r\n")
+  io.write("Cache-Control: no-store\r\n\r\n")
+  io.write(jsonc.stringify(tbl) .. "\n")
+end
+
+local method = os.getenv("REQUEST_METHOD") or "GET"
+if method == "OPTIONS" then
+  send_json("200 OK", { ok = true })
+  os.exit(0)
+end
+if method ~= "POST" then
+  send_json("405 Method Not Allowed", { error = "Use POST JSON-RPC 2.0" })
+  os.exit(0)
+end
+
+local len = tonumber(os.getenv("CONTENT_LENGTH") or "0") or 0
+local body = len > 0 and io.read(len) or io.read("*a") or ""
+local req = jsonc.parse(body)
+
+if not req then
+  send_json("400 Bad Request", { jsonrpc = "2.0", error = { code = -32700, message = "Parse error" } })
+  os.exit(0)
+end
+
+local conn = ubus.connect()
+if not conn then
+  send_json("500 Internal Server Error", { jsonrpc = "2.0", error = { code = -32603, message = "ubus connect failed" } })
+  os.exit(0)
+end
+
+local remote_addr = os.getenv("REMOTE_ADDR") or ""
+
+-- Explicitly whitelisted read-only objects/methods for live dashboard telemetry
+local READ_ALLOW = {
+  ["aw1000:status"] = true,
+  ["aw1000:telemetry"] = true,
+  ["aw1000:static_info"] = true,
+  ["aw1000:modem_get"] = true,
+  ["aw1000:wifi_get"] = true,
+  ["aw1000:clients"] = true,
+  ["aw1000:sms_list"] = true,
+  ["aw1000:backup_list"] = true,
+  ["aw1000:logs_get"] = true,
+  ["system:info"] = true,
+  ["system:board"] = true,
+  ["network.interface.wan:status"] = true,
+  ["network.interface.lan:status"] = true,
+  ["luci-rpc:getHostHints"] = true,
+  ["luci-rpc:getDHCPLeases"] = true,
+  ["service:list"] = true
+}
+
+-- Explicitly whitelisted write methods (require valid rpcd session token)
+local WRITE_ALLOW = {
+  ["aw1000:wifi_set"] = true,
+  ["aw1000:imei_set"] = true,
+  ["aw1000:ttl_set"] = true,
+  ["aw1000:mac_acl"] = true,
+  ["aw1000:modem_restart"] = true,
+  ["aw1000:backup_create"] = true,
+  ["system:reboot"] = true,
+  ["modem_pdn:set"] = true,
+  ["modem_reset:reset"] = true,
+  ["modem_reset:exec"] = true
+}
+
+local function handle_one(item)
+  local id = item.id
+  if item.method ~= "call" or type(item.params) ~= "table" then
+    return { jsonrpc = "2.0", id = id, error = { code = -32600, message = "Invalid Request" } }
+  end
+
+  local sid = tostring(item.params[1] or "")
+  local obj = tostring(item.params[2] or "")
+  local fn  = tostring(item.params[3] or "")
+  local args = type(item.params[4]) == "table" and item.params[4] or {}
+  local key = obj .. ":" .. fn
+
+  if key == "session:login" then
+    local res, code = conn:call("session", "login", args)
+    return { jsonrpc = "2.0", id = id, result = { code or 0, res } }
+  end
+
+  if READ_ALLOW[key] then
+    local res, code = conn:call(obj, fn, args)
+    if type(res) == "table" and remote_addr ~= "" then
+      res._caller_ip = remote_addr
+    end
+    return { jsonrpc = "2.0", id = id, result = { code or 0, res } }
+  end
+
+  if WRITE_ALLOW[key] then
+    if sid == "" or sid == "00000000000000000000000000000000" then
+      return { jsonrpc = "2.0", id = id, result = { 6, { error = "Authentication required for write actions" } } }
+    end
+    local acc = conn:call("session", "access", {
+      ubus_rpc_session = sid,
+      scope = "ubus",
+      object = obj,
+      ["function"] = fn
+    })
+    if not acc or acc.access ~= true then
+      return { jsonrpc = "2.0", id = id, result = { 6, { error = "ACL permission denied" } } }
+    end
+    if key == "aw1000:mac_acl" and remote_addr ~= "" then
+      args.client_ip = remote_addr
+    end
+    local res, code = conn:call(obj, fn, args)
+    return { jsonrpc = "2.0", id = id, result = { code or 0, res } }
+  end
+
+  return { jsonrpc = "2.0", id = id, result = { 6, { error = "Method blocked by AW1000 PWA security policy" } } }
+end
+
+if req[1] ~= nil then
+  local out = {}
+  for i, item in ipairs(req) do
+    out[i] = handle_one(item)
+  end
+  send_json("200 OK", out)
+else
+  send_json("200 OK", handle_one(req))
+end
+
+conn:close()

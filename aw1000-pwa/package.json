@@ -1,0 +1,15 @@
+{
+  "name": "aw1000-control-pwa",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Light, fast, RGB-accented PWA to manage the AW1000 Ultra 5G Router locally (192.168.1.1) and remotely via NetBird, Tailscale, or WireGuard",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/dev-server.mjs",
+    "size": "node scripts/build.mjs --report"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

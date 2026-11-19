@@ -1,0 +1,224 @@
+#!/bin/sh
+# aw1000-deadman - router-side auto-rollback for AW1000 Manager
+#
+# Two job types, one engine. Only one job can run at a time.
+#
+#   VPN switch:
+#     aw1000-deadman start --to netbird|tailscale|off [--up-timeout 90] [--commit-timeout 300]
+#   File change (Wi-Fi .dat, ACL, ...):
+#     aw1000-deadman start --files /etc/a,/etc/b --apply /tmp/apply.sh [--restore-cmd 'wifi restart'] [--commit-timeout 180]
+#
+#   aw1000-deadman preflight --to <target>   JSON checklist, read-only
+#   aw1000-deadman status                    JSON: job state + seconds left
+#   aw1000-deadman commit                    keep the new state
+#   aw1000-deadman cancel                    revert now
+#   aw1000-deadman last-log                  tail of the job log
+#
+# Safety design for VPN switches:
+#   * Boot-time enable flags are NOT touched until commit. The new VPN is only
+#     *started*; the old one is only *stopped*. If the router reboots or loses
+#     power before commit, the previous VPN comes back at boot by itself.
+#   * The worker runs detached (nohup) so it survives the SSH session dropping.
+#   * "off" is refused unless the caller's SSH session comes from the LAN.
+
+VERSION=1
+D="${AW1000_DM_DIR:-/tmp/aw1000-deadman}"
+LOG="$D/log"
+LAST="${AW1000_DM_LAST:-/etc/aw1000-deadman.last}"
+LAN_PREFIX="${AW1000_LAN_PREFIX:-192.168.1.}"
+SELF="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+
+mkdir -p "$D"
+log() { echo "$(date '+%F %T') $*" >>"$LOG"; logger -t aw1000-deadman "$*"; }
+setst() { echo "$1" >"$D/status"; }
+js() { printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"; }
+
+# ---------- VPN primitives ----------
+svc() { /etc/init.d/"$1" "$2" >/dev/null 2>&1; }
+is_running() { pidof "$([ "$1" = tailscale ] && echo tailscaled || echo netbird)" >/dev/null 2>&1; }
+is_up() {
+	case "$1" in
+		netbird)   netbird status 2>/dev/null | grep -q '^Management: Connected' ;;
+		tailscale) ip -4 addr show dev tailscale0 2>/dev/null | grep -q 'inet 100\.' ;;
+		off)       return 0 ;;
+	esac
+}
+caller_on_lan() { case "${SSH_CLIENT%% *}" in "$LAN_PREFIX"*) return 0 ;; esac; return 1; }
+
+preflight() { # $1 target -> JSON, exit 0 if all ok
+	t="$1"; ok=1; out=""
+	chk() { # name pass(0/1) detail
+		[ "$2" = 1 ] || ok=0
+		out="$out$([ -n "$out" ] && echo ,){\"check\":$(js "$1"),\"ok\":$([ "$2" = 1 ] && echo true || echo false),\"detail\":$(js "$3")}"
+	}
+	busy=0; [ -f "$D/job" ] && busy=1
+	chk "no_active_job" $((1 - busy)) "$(cat "$D/status" 2>/dev/null)"
+	case "$t" in
+		netbird)
+			b=0; [ -x /usr/sbin/netbird ] || [ -x /usr/bin/netbird ] && b=1
+			chk "binary" $b "netbird"
+			e=0; [ -s /etc/netbird/default.json ] && e=1
+			chk "enrolled" $e "/etc/netbird/default.json" ;;
+		tailscale)
+			b=0; [ -x /usr/sbin/tailscaled ] && b=1
+			chk "binary" $b "tailscaled"
+			cli=0; /usr/sbin/tailscale version >/dev/null 2>&1 && cli=1
+			chk "cli" $cli "tailscale CLI needed for enrollment"
+			e=0; [ -s /etc/tailscale/tailscaled.state ] && e=1
+			chk "enrolled" $e "/etc/tailscale/tailscaled.state"
+			fm="$(uci -q get tailscale.settings.fw_mode)"
+			f=0; [ "$fm" = iptables ] && f=1
+			chk "fw_mode_iptables" $f "current: ${fm:-unset (init default nftables)}" ;;
+		off)
+			l=0; caller_on_lan && l=1
+			chk "caller_on_lan" $l "${SSH_CLIENT%% *}" ;;
+		*) chk "target" 0 "unknown target: $t" ;;
+	esac
+	printf '{"target":%s,"ok":%s,"checks":[%s]}\n' "$(js "$t")" "$([ $ok = 1 ] && echo true || echo false)" "$out"
+	[ $ok = 1 ]
+}
+
+# ---------- worker ----------
+wait_commit() { # $1 timeout -> 0 commit, 1 timeout, 2 cancel
+	end=$(( $(date +%s) + $1 )); echo "$end" >"$D/deadline"
+	while [ "$(date +%s)" -lt "$end" ]; do
+		[ -f "$D/commit" ] && return 0
+		[ -f "$D/cancel" ] && return 2
+		sleep 1
+	done
+	return 1
+}
+finish() { # $1 result
+	setst "$1"; log "result: $1"
+	echo "$(date '+%F %T') $(cat "$D/job" 2>/dev/null) -> $1" >"$LAST"
+	rm -f "$D/job" "$D/commit" "$D/cancel" "$D/deadline"
+}
+
+vpn_rollback() { # $1 reason
+	log "rollback ($1): restoring nb_run=$P_NB_RUN ts_run=$P_TS_RUN"
+	[ "$P_TS_RUN" = 1 ] || svc tailscale stop
+	[ "$P_NB_RUN" = 1 ] || svc netbird stop
+	[ "$P_NB_RUN" = 1 ] && ! is_running netbird && svc netbird start
+	[ "$P_TS_RUN" = 1 ] && ! is_running tailscale && svc tailscale start
+	finish "rolled_back:$1"
+}
+
+worker_vpn() {
+	log "vpn switch -> $TARGET (up ${UP_T}s, commit ${COMMIT_T}s)"
+	setst "switching"
+	if [ "$TARGET" != off ]; then
+		is_running "$TARGET" || svc "$TARGET" start
+		i=0
+		until is_up "$TARGET"; do
+			sleep 2; i=$((i + 2))
+			[ -f "$D/cancel" ] && { vpn_rollback cancelled; return; }
+			[ $i -ge "$UP_T" ] && { vpn_rollback no-up; return; }
+		done
+		log "$TARGET is up after ${i}s"
+	fi
+	for s in netbird tailscale; do [ "$s" != "$TARGET" ] && svc "$s" stop; done
+	setst "awaiting_commit"
+	wait_commit "$COMMIT_T"
+	case $? in
+		0)
+			for s in netbird tailscale; do
+				if [ "$s" = "$TARGET" ]; then svc "$s" enable; else svc "$s" disable; fi
+			done
+			finish committed ;;
+		1) vpn_rollback no-commit ;;
+		2) vpn_rollback cancelled ;;
+	esac
+}
+
+files_restore() {
+	log "restoring files: $FILES"
+	IFS=','; for f in $FILES; do
+		b="$D/files/$(echo "$f" | tr '/' '_')"
+		if [ -e "$b" ]; then cp -p "$b" "$f"; else rm -f "$f"; fi
+	done; unset IFS
+	[ -n "$RESTORE_CMD" ] && sh -c "$RESTORE_CMD" >>"$LOG" 2>&1
+}
+worker_files() {
+	log "file change: $FILES (commit ${COMMIT_T}s)"
+	setst "applying"
+	if ! sh "$D/apply.sh" >>"$LOG" 2>&1; then
+		files_restore; finish "rolled_back:apply-failed"; return
+	fi
+	setst "awaiting_commit"
+	wait_commit "$COMMIT_T"
+	case $? in
+		0) finish committed ;;
+		1) files_restore; finish "rolled_back:no-commit" ;;
+		2) files_restore; finish "rolled_back:cancelled" ;;
+	esac
+}
+
+worker() {
+	exec 9>"$D/lock"; flock -n 9 || exit 1
+	. "$D/job.env"
+	case "$KIND" in vpn) worker_vpn ;; files) worker_files ;; esac
+}
+
+# ---------- start ----------
+start() {
+	KIND=""; TARGET=""; FILES=""; APPLY=""; RESTORE_CMD=""; UP_T=90; COMMIT_T=300
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			--to) KIND=vpn; TARGET="$2"; shift ;;
+			--files) KIND=files; FILES="$2"; shift ;;
+			--apply) APPLY="$2"; shift ;;
+			--restore-cmd) RESTORE_CMD="$2"; shift ;;
+			--up-timeout) UP_T="$2"; shift ;;
+			--commit-timeout) COMMIT_T="$2"; shift ;;
+		esac; shift
+	done
+	case "$UP_T$COMMIT_T" in *[!0-9]*) echo '{"ok":false,"error":"bad timeout"}'; exit 2 ;; esac
+	[ -f "$D/job" ] && { echo '{"ok":false,"error":"job already active"}'; exit 1; }
+	rm -f "$D/commit" "$D/cancel"
+
+	if [ "$KIND" = vpn ]; then
+		preflight "$TARGET" >"$D/preflight.json" || { cat "$D/preflight.json"; exit 1; }
+		P_NB_RUN=0; is_running netbird && P_NB_RUN=1
+		P_TS_RUN=0; is_running tailscale && P_TS_RUN=1
+		JOB="vpn:$TARGET"
+	elif [ "$KIND" = files ]; then
+		[ -n "$FILES" ] && [ -f "$APPLY" ] || { echo '{"ok":false,"error":"--files and --apply <script> required"}'; exit 2; }
+		rm -rf "$D/files"; mkdir -p "$D/files"
+		IFS=','; for f in $FILES; do [ -e "$f" ] && cp -p "$f" "$D/files/$(echo "$f" | tr '/' '_')"; done; unset IFS
+		cp "$APPLY" "$D/apply.sh"
+		JOB="files:$FILES"
+	else
+		echo '{"ok":false,"error":"need --to or --files"}'; exit 2
+	fi
+
+	{
+		echo "KIND='$KIND'"; echo "TARGET='$TARGET'"; echo "FILES='$FILES'"
+		echo "UP_T='$UP_T'"; echo "COMMIT_T='$COMMIT_T'"
+		echo "P_NB_RUN='$P_NB_RUN'"; echo "P_TS_RUN='$P_TS_RUN'"
+	} >"$D/job.env"
+	printf 'RESTORE_CMD=%s\n' "'$(printf '%s' "$RESTORE_CMD" | sed "s/'/'\\\\''/g")'" >>"$D/job.env"
+	echo "$JOB" >"$D/job"; setst "starting"; : >"$LOG"
+	nohup "$SELF" _worker </dev/null >/dev/null 2>&1 &
+	echo "{\"ok\":true,\"job\":$(js "$JOB"),\"commit_timeout\":$COMMIT_T}"
+}
+
+status() {
+	st="$(cat "$D/status" 2>/dev/null)"; left=null
+	[ -f "$D/deadline" ] && left=$(( $(cat "$D/deadline") - $(date +%s) ))
+	[ "$left" != null ] && [ "$left" -lt 0 ] && left=0
+	printf '{"v":%s,"active":%s,"job":%s,"status":%s,"seconds_left":%s,"last":%s}\n' \
+		"$VERSION" "$([ -f "$D/job" ] && echo true || echo false)" "$(js "$(cat "$D/job" 2>/dev/null)")" \
+		"$(js "$st")" "$left" "$(js "$(cat "$LAST" 2>/dev/null)")"
+}
+
+case "$1" in
+	start) shift; start "$@" ;;
+	_worker) worker ;;
+	preflight) preflight "$3" ;;  # preflight --to X
+	status) status ;;
+	commit) [ "$(cat "$D/status" 2>/dev/null)" = awaiting_commit ] && touch "$D/commit" && echo '{"ok":true}' || { echo '{"ok":false,"error":"nothing to commit"}'; exit 1; } ;;
+	cancel) [ -f "$D/job" ] && touch "$D/cancel" && echo '{"ok":true}' || { echo '{"ok":false,"error":"no active job"}'; exit 1; } ;;
+	last-log) tail -n 50 "$LOG" 2>/dev/null ;;
+	--version) echo "$VERSION" ;;
+	*) echo "usage: $0 start|preflight|status|commit|cancel|last-log|--version" >&2; exit 2 ;;
+esac

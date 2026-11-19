@@ -1,0 +1,62 @@
+{
+  "aw1000-pwa-readonly": {
+    "description": "AW1000 Control PWA — Read-only telemetry access for dedicated 'pwa' rpcd account",
+    "read": {
+      "ubus": {
+        "system": [ "board", "info" ],
+        "network.device": [ "status" ],
+        "network.interface": [ "dump" ],
+        "network.interface.lan": [ "status" ],
+        "network.interface.wan": [ "status" ],
+        "network.interface.wan6": [ "status" ],
+        "network.wireless": [ "status" ],
+        "iwinfo": [ "devices", "info", "assoclist", "freqlist" ],
+        "luci-rpc": [ "getHostHints", "getDHCPLeases", "getWirelessDevices", "getNetworkDevices" ],
+        "service": [ "list" ],
+        "log": [ "read" ],
+        "ril": [ "*" ],
+        "ril.unsol.nw.signal": [ "*" ],
+        "ril.unsol.nw.ecell": [ "*" ],
+        "ril.unsol.nw.nrthroughput": [ "*" ],
+        "ril.unsol.nw.ltethroughput": [ "*" ],
+        "ril.unsol.nw.cscon": [ "*" ],
+        "ril.unsol.nw.nitz": [ "*" ],
+        "ril.unsol.sms.pdu": [ "*" ],
+        "ril.unsol.sms.ussd": [ "*" ],
+        "modem_pdn": [ "get", "list", "status" ],
+        "aw1000": [
+          "status",
+          "telemetry",
+          "static_info",
+          "modem_get",
+          "wifi_get",
+          "clients",
+          "sms_list",
+          "backup_list",
+          "logs_get"
+        ]
+      },
+      "uci": [ "network", "wireless", "dhcp", "system" ]
+    }
+  },
+  "aw1000-pwa-write": {
+    "description": "AW1000 Control PWA — Strictly scoped write actions (NO dropbear, NO netbird, NO tailscale, NO firewall)",
+    "write": {
+      "ubus": {
+        "system": [ "reboot" ],
+        "modem_pdn": [ "set" ],
+        "modem_reset": [ "reset", "exec" ],
+        "ril.unsol.sms.pdu": [ "send" ],
+        "ril.unsol.sms.ussd": [ "send" ],
+        "aw1000": [
+          "wifi_set",
+          "imei_set",
+          "ttl_set",
+          "mac_acl",
+          "modem_restart",
+          "backup_create"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,41 @@
+# ==============================================================================
+# Strict Public Repository Allowlist for eddiealexander77/aw1000-control
+# Blocks all personal router logs, SSH credentials, keystores, and local backups
+# ==============================================================================
+/*
+
+!.gitignore
+!README.md
+!.github/
+!.github/**
+!aw1000-web/
+!aw1000-web/**
+!aw1000-pwa/
+!aw1000-pwa/**
+!aw1000-apk/
+!aw1000-apk/**
+!aw1000-release/
+!aw1000-release/**
+!router/
+!router/aw1000-telemetry
+!router/aw1000-ctl
+
+# Always ignore build artifacts, signing secrets, dependencies, and personal scripts
+node_modules/
+*.jks
+*.keystore
+local.properties
+.gradle/
+app/build/
+*.tar
+*.tar.gz
+*.apk
+*.ipk
+*.log
+*.bak
+aw1000-pwa/certs/
+aw1000-pwa/scripts/push-to-router.sh
+aw1000-pwa/DEPLOY.md
+aw1000-pwa/dist/
+aw1000-pwa/design-mock.html
+aw1000-release/SHA256SUMS.txt

@@ -1,0 +1,748 @@
+#!/bin/sh
+# aw1000-ctl - router-side control & action helper for AW1000 Manager
+# Target: AW1000_Ultra, OpenWrt 19.07.7, BusyBox ash, FG360 (MIPC), MT7915 vendor Wi-Fi
+#
+# HARD CONSTRAINT: Never modifies SSH (dropbear, authorized_keys, /etc/passwd)
+# or NetBird config/service/firewall chains directly. VPN switching is handled
+# exclusively by aw1000-deadman.
+#
+# Subcommands (all output JSON):
+#   --version
+#   modem-get                                    -> network mode, 5g mode, bandlocks, celllock, apn, ttl
+#   modem-mode <auto|4g|5g-nsa|5g-sa>            -> sets AT+GTACT / AT+E5GOPT + CFUN=4/1
+#   band-lock <arg> [auto_restore 0|1]           -> e.g. "4,1/3/28;5,28/78" or "all"
+#   cell-scan                                    -> runs /bin/modem_status --cell_info & outputs JSON
+#   cell-lock <arg> [auto_restore 0|1]           -> e.g. "4,9510/226;5,634080/208" or "unlock"
+#   apn-set <apn> [iptype] [auth] [user] [pass] [auto_restore]
+#   ttl-set <off|1..255>                         -> clean idempotent mangle rule + /etc/config/3ginfo_ttl
+#   modem-restart                                -> AT+CFUN=4; sleep 2; AT+CFUN=1
+#   wan-restart                                  -> ifup wan
+#   wifi-get                                     -> full ra0 + rai0 settings including ACL & masked/raw psk
+#   wifi-scan [ra0|rai0|both]                    -> nearby AP count per channel + top AP list (via mtkwifi)
+#   wifi-apply <json_file> [--commit-timeout N]  -> stages & applies .dat changes under aw1000-deadman
+#   vnstat-get                                   -> ensures ccmni2 is tracked and returns vnstat --json
+#   sms-list [SM|ME|MT]                          -> storage status + decoded inbox + outbox + forward cfg
+#   sms-send <number> <text_b64> [SM|ME]         -> encodes PDU, sends via sms-mtk-send.sh, records outbox
+#   sms-delete <storage> <idx1,idx2,...>         -> deletes inbox messages by index
+#   sms-outbox-del <id|all>                      -> deletes outbox entry or clears outbox
+#   backup-list                                  -> lists USB backups on /mnt/sda1
+#   backup-create [tag]                          -> creates config backup tarball + sha256 on /mnt/sda1
+#   backup-verify <path>                         -> verifies sha256 or tar integrity
+#   backup-delete <path>                         -> deletes a backup file on /mnt/sda1
+#   diag <ping|traceroute|nslookup> <target>     -> structured diagnostic output
+#   fw-check                                     -> live hit counters for vendor-port DROP rules
+#   logs [all|modem|wifi|vpn|auth] [hide_noise 0|1] [lines]
+#   power <reboot|modem-restart|schedule-get|schedule-set> [cron_expr|off]
+
+VERSION=1
+MODEM_STATUS="/bin/modem_status"
+MIPC_CLI="/usr/bin/mipc_wan_cli"
+DEADMAN="/usr/bin/aw1000-deadman"
+
+js() {
+	printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\r\n\t' '   ' | tr -d '\000-\037')"
+}
+num() {
+	case "$1" in
+		''|-|*[!0-9.-]*|?*-*) printf null ;;
+		*) printf '%s' "$1" ;;
+	esac
+}
+die() {
+	printf '{"ok":false,"error":%s}\n' "$(js "$1")"
+	exit 1
+}
+
+uci_3g_sec() {
+	s="$(uci -q show 3ginfo | sed -n 's/^3ginfo\.\([^.=]*\)=3ginfo$/\1/p' | head -1)"
+	echo "${s:-@3ginfo[0]}"
+}
+
+# ---------- MODEM ----------
+modem_get() {
+	BL="$($MODEM_STATUS --get_bandlock 2>/dev/null)"
+	[ -n "$BL" ] || BL='{}'
+	GT="$($MODEM_STATUS --at_cmd 'AT+GTACT?' 2>/dev/null | tr -d '\r' | sed -n 's/^+GTACT:[[:space:]]*//p' | head -1)"
+	E5="$($MODEM_STATUS --at_cmd 'AT+E5GOPT?' 2>/dev/null | tr -d '\r' | sed -n 's/^+E5GOPT:[[:space:]]*//p' | head -1)"
+	CL_AT="$($MIPC_CLI --at_cmd 'AT+GTCELLLOCK?' 2>/dev/null | tr -d '\r' | sed -n 's/^+GTCELLLOCK:[[:space:]]*//p' | head -1)"
+	SEC="$(uci_3g_sec)"
+	CL_UCI="$(uci -q get 3ginfo.$SEC.celllock)"
+	BL_UCI="$(uci -q get 3ginfo.$SEC.bandlock)"
+	AR_BL="$(uci -q get 3ginfo.$SEC.auto_restore_bandlock)"
+	AR_CL="$(uci -q get 3ginfo.$SEC.auto_restore_celllock)"
+	AR_APN="$(uci -q get 3ginfo.$SEC.auto_restore_apn)"
+
+	# Map GTACT + E5GOPT to high-level mode
+	RAT="${GT%%,*}"
+	MODE="auto"
+	case "$RAT:$E5" in
+		2:*)   MODE="4g" ;;
+		14:*)  MODE="5g-sa" ;;
+		*:5)   MODE="5g-nsa" ;;
+		*:3)   MODE="5g-sa" ;;
+		*:1)   MODE="4g" ;;
+		*)     MODE="auto" ;;
+	esac
+
+	APN="$(uci -q get network.wan.apn)"
+	AUTH="$(uci -q get network.wan.auth)"
+	USER="$(uci -q get network.wan.username)"
+	PASS="$(uci -q get network.wan.password)"
+	IPTYPE="$(uci -q get network.wan.iptype)"
+	AUTOCONF="$(uci -q get network.wan.auto_conf)"
+
+	TTL_EN="$(uci -q get 3ginfo_ttl.main.enable)"
+	TTL_VAL="$(uci -q get 3ginfo_ttl.main.ttl)"
+	TTL_LIVE="$(iptables -t mangle -S POSTROUTING 2>/dev/null | sed -n 's/.*--ttl-set \([0-9]*\).*/\1/p' | head -1)"
+	WIF="$(ip route show default 2>/dev/null | awk '{for(i=1;i<NF;i++) if($i=="dev"){print $(i+1); exit}}')"
+
+	printf '{"ok":true,"mode":%s,"gtact":%s,"e5gopt":%s,"bandlock":%s,"stored_bandlock":%s,"auto_restore_bandlock":%s,' \
+		"$(js "$MODE")" "$(js "$GT")" "$(num "$E5")" "$BL" "$(js "$BL_UCI")" "$(num "${AR_BL:-0}")"
+	printf '"stored_celllock":%s,"gtcelllock":%s,"auto_restore_celllock":%s,' \
+		"$(js "$CL_UCI")" "$(js "$CL_AT")" "$(num "${AR_CL:-0}")"
+	printf '"apn":{"apn":%s,"auth":%s,"username":%s,"password":%s,"iptype":%s,"auto_conf":%s,"auto_restore":%s},' \
+		"$(js "$APN")" "$(js "${AUTH:-none}")" "$(js "$USER")" "$(js "$PASS")" "$(num "${IPTYPE:-3}")" "$(num "${AUTOCONF:-0}")" "$(num "${AR_APN:-0}")"
+	printf '"ttl":{"enabled":%s,"val":%s,"live":%s,"iface":%s}}\n' \
+		"$(num "${TTL_EN:-0}")" "$(num "${TTL_VAL:-64}")" "$(num "$TTL_LIVE")" "$(js "${WIF:-ccmni2}")"
+}
+
+radio_cycle() {
+	$MODEM_STATUS --at_cmd 'AT+CFUN=4' >/dev/null 2>&1
+	sleep 2
+	$MODEM_STATUS --at_cmd 'AT+CFUN=1' >/dev/null 2>&1
+}
+
+modem_mode() {
+	case "$1" in
+		auto)
+			$MODEM_STATUS --at_cmd 'AT+E5GOPT=7' >/dev/null 2>&1
+			$MODEM_STATUS --at_cmd 'AT+GTACT=20,6,3' >/dev/null 2>&1
+			;;
+		4g)
+			$MODEM_STATUS --at_cmd 'AT+E5GOPT=1' >/dev/null 2>&1
+			$MODEM_STATUS --at_cmd 'AT+GTACT=2,3' >/dev/null 2>&1
+			;;
+		5g-nsa)
+			$MODEM_STATUS --at_cmd 'AT+E5GOPT=5' >/dev/null 2>&1
+			$MODEM_STATUS --at_cmd 'AT+GTACT=17,6,3' >/dev/null 2>&1
+			;;
+		5g-sa)
+			$MODEM_STATUS --at_cmd 'AT+E5GOPT=3' >/dev/null 2>&1
+			$MODEM_STATUS --at_cmd 'AT+GTACT=14,6' >/dev/null 2>&1
+			;;
+		*) die "unknown mode: $1 (use auto|4g|5g-nsa|5g-sa)" ;;
+	esac
+	radio_cycle
+	printf '{"ok":true,"mode":%s}\n' "$(js "$1")"
+}
+
+band_lock() {
+	arg="$1"; ar="$2"
+	[ -n "$arg" ] || die "missing bandlock arg"
+	SEC="$(uci_3g_sec)"
+	if [ "$arg" = "all" ]; then
+		eval "$($MODEM_STATUS --get_bandlock 2>/dev/null | jsonfilter \
+			-e 'U=@.support_umts_band' -e 'L=@.support_lte_band' -e 'N=@.support_nr_band' 2>/dev/null)"
+		arg="3,${U:-1/5/8};4,${L:-1/3/5/7/8/18/19/20/26/28/32/38/40/41/42/43};5,${N:-1/3/5/7/8/20/28/38/40/41/77/78/79}"
+		uci -q delete "3ginfo.$SEC.bandlock"
+	else
+		case "$arg" in *[!0-9,/\;]*|'') die "invalid bandlock arg" ;; esac
+		uci -q set "3ginfo.$SEC.bandlock=$arg"
+	fi
+	[ -n "$ar" ] && uci -q set "3ginfo.$SEC.auto_restore_bandlock=$([ "$ar" = 1 ] && echo 1 || echo 0)"
+	uci -q commit 3ginfo
+	out="$($MODEM_STATUS --set_bandlock "$arg" 2>&1)"
+	rc=$?
+	[ $rc -eq 0 ] || die "set_bandlock failed: $out"
+	printf '{"ok":true,"bandlock":%s}\n' "$(js "$arg")"
+}
+
+cell_scan() {
+	$MODEM_STATUS --cell_info >/dev/null 2>&1
+	if [ -s /tmp/modem_cell_info.json ]; then
+		cat /tmp/modem_cell_info.json
+		echo
+	else
+		die "no cell_info json"
+	fi
+}
+
+cell_lock() {
+	arg="$1"; ar="$2"
+	[ -n "$arg" ] || die "missing celllock arg"
+	SEC="$(uci_3g_sec)"
+	if [ "$arg" = "unlock" ] || [ "$arg" = "0,0,0" ]; then
+		$MODEM_STATUS --set_celllock "0,0,0" >/dev/null 2>&1
+		/usr/share/3ginfo-lite/celllock.sh unlock >/dev/null 2>&1 || true
+		uci -q delete "3ginfo.$SEC.celllock"
+		[ -n "$ar" ] && uci -q set "3ginfo.$SEC.auto_restore_celllock=$([ "$ar" = 1 ] && echo 1 || echo 0)"
+		uci -q commit 3ginfo
+		echo '{"ok":true,"celllock":""}'
+		return
+	fi
+	case "$arg" in *[!0-9,/\;]*|'') die "invalid celllock arg (expected e.g. 4,9510/226;5,634080/208)" ;; esac
+	out="$($MODEM_STATUS --set_celllock "$arg" 2>&1)"
+	rc=$?
+	[ $rc -eq 0 ] || die "set_celllock failed: $out"
+	uci -q set "3ginfo.$SEC.celllock=$arg"
+	[ -n "$ar" ] && uci -q set "3ginfo.$SEC.auto_restore_celllock=$([ "$ar" = 1 ] && echo 1 || echo 0)"
+	uci -q commit 3ginfo
+	printf '{"ok":true,"celllock":%s}\n' "$(js "$arg")"
+}
+
+apn_set() {
+	apn="$1"; iptype="${2:-3}"; auth="${3:-none}"; user="$4"; pass="$5"; ar="${6:-1}"
+	[ -n "$apn" ] || die "APN cannot be empty"
+	case "$apn" in *[\'\"\\\;\&\|]*) die "invalid characters in APN" ;; esac
+	SEC="$(uci_3g_sec)"
+	uci -q set "network.wan.apn=$apn"
+	uci -q set "network.wan.iptype=$iptype"
+	uci -q set "network.wan.auth=$auth"
+	if [ -n "$user" ]; then uci -q set "network.wan.username=$user"; else uci -q delete "network.wan.username"; fi
+	if [ -n "$pass" ]; then uci -q set "network.wan.password=$pass"; else uci -q delete "network.wan.password"; fi
+	uci -q commit network
+
+	uci -q set "3ginfo.$SEC.apn_profile_apn=$apn"
+	uci -q set "3ginfo.$SEC.apn_profile_iptype=$iptype"
+	uci -q set "3ginfo.$SEC.apn_profile_auth=$auth"
+	if [ -n "$user" ]; then uci -q set "3ginfo.$SEC.apn_profile_username=$user"; else uci -q delete "3ginfo.$SEC.apn_profile_username"; fi
+	if [ -n "$pass" ]; then uci -q set "3ginfo.$SEC.apn_profile_password=$pass"; else uci -q delete "3ginfo.$SEC.apn_profile_password"; fi
+	uci -q set "3ginfo.$SEC.auto_restore_apn=$([ "$ar" = 1 ] && echo 1 || echo 0)"
+	uci -q commit 3ginfo
+
+	/sbin/ifup wan >/dev/null 2>&1 &
+	printf '{"ok":true,"apn":%s,"iptype":%s,"auth":%s}\n' "$(js "$apn")" "$(num "$iptype")" "$(js "$auth")"
+}
+
+ttl_clean_mangle() {
+	while iptables -t mangle -S POSTROUTING 2>/dev/null | grep -q '3ginfo_ttl'; do
+		rule="$(iptables -t mangle -S POSTROUTING | grep -m1 '3ginfo_ttl' | sed 's/^-A /-D /')"
+		iptables -t mangle $rule 2>/dev/null || break
+	done
+	while ip6tables -t mangle -S POSTROUTING 2>/dev/null | grep -q '3ginfo_ttl'; do
+		rule="$(ip6tables -t mangle -S POSTROUTING | grep -m1 '3ginfo_ttl' | sed 's/^-A /-D /')"
+		ip6tables -t mangle $rule 2>/dev/null || break
+	done
+}
+
+ttl_set() {
+	val="$1"
+	[ -n "$val" ] || die "missing ttl value (off or 1..255)"
+	ttl_clean_mangle
+	if [ "$val" = "off" ] || [ "$val" = "0" ]; then
+		uci -q set 3ginfo_ttl.main.enable='0'
+		uci -q commit 3ginfo_ttl
+		rm -f /etc/firewall.d/3ginfo_ttl
+		echo '{"ok":true,"enabled":0,"val":null}'
+		return
+	fi
+	case "$val" in *[!0-9]*) die "invalid ttl value" ;; esac
+	[ "$val" -ge 1 ] && [ "$val" -le 255 ] || die "ttl out of range 1..255"
+	uci -q set 3ginfo_ttl.main.enable='1'
+	uci -q set "3ginfo_ttl.main.ttl=$val"
+	uci -q commit 3ginfo_ttl
+	mkdir -p /etc/firewall.d
+	cat > /etc/firewall.d/3ginfo_ttl <<EOF
+iptables -t mangle -C POSTROUTING -j TTL --ttl-set $val -m comment --comment 3ginfo_ttl 2>/dev/null || iptables -t mangle -A POSTROUTING -j TTL --ttl-set $val -m comment --comment 3ginfo_ttl
+ip6tables -t mangle -C POSTROUTING -j HL --hl-set $val -m comment --comment 3ginfo_ttl 2>/dev/null || ip6tables -t mangle -A POSTROUTING -j HL --hl-set $val -m comment --comment 3ginfo_ttl
+EOF
+	sh /etc/firewall.d/3ginfo_ttl
+	printf '{"ok":true,"enabled":1,"val":%s}\n' "$val"
+}
+
+# ---------- WI-FI ----------
+dat_get() { grep -m1 "^$2=" "$1" 2>/dev/null | cut -d= -f2-; }
+
+wifi_get() {
+	W=/etc/wireless/mediatek
+	printf '{"ok":true,'
+	f=1
+	for pair in ra0:mt7915.1.dat rai0:mt7915.2.dat; do
+		ifc="${pair%%:*}"; d="$W/${pair#*:}"
+		[ $f = 1 ] || printf ','; f=0
+		up=0; [ "$(cat /sys/class/net/$ifc/operstate 2>/dev/null)" = up ] && up=1
+		auth="$(dat_get $d AuthMode)"; auth="${auth%%;*}"
+		enc="$(dat_get $d EncrypType)"; enc="${enc%%;*}"
+		hide="$(dat_get $d HideSSID)"; hide="${hide%%;*}"
+		ht="$(dat_get $d HT_BW)"; vht="$(dat_get $d VHT_BW)"
+		bw=20
+		[ "$ht" = "1" ] && bw=40
+		[ "$ht" = "1" ] && [ "$vht" = "1" ] && bw=80
+		[ "$ht" = "1" ] && [ "$vht" = "2" ] && bw=160
+		printf '"%s":{"up":%s,"radio":%s,"ssid":%s,"key":%s,"auth":%s,"enc":%s,"ch":%s,"auto_ch":%s,"bw":%s,"ht_bw":%s,"vht_bw":%s,"hidden":%s,"acl_policy":%s,"acl_list":%s}' \
+			"$ifc" "$up" "$(num "$(dat_get $d RadioOn)")" "$(js "$(dat_get $d SSID1)")" \
+			"$(js "$(dat_get $d WPAPSK1)")" "$(js "$auth")" "$(js "$enc")" \
+			"$(num "$(dat_get $d Channel)")" "$(num "$(dat_get $d AutoChannelSelect)")" \
+			"$bw" "$(num "$ht")" "$(num "$vht")" "$(num "$hide")" \
+			"$(num "$(dat_get $d AccessPolicy0)")" "$(js "$(dat_get $d AccessControlList0)")"
+	done
+	printf '}\n'
+}
+
+wifi_scan() {
+	target="${1:-both}"
+	lua - "$target" <<'LUA'
+package.path = "/lib/wifi/?.lua;" .. package.path
+local ok_m, mtkwifi = pcall(require, "mtkwifi")
+local json = require("luci.jsonc")
+if not ok_m then
+	print('{"ok":false,"error":"mtkwifi not available"}')
+	os.exit(1)
+end
+local target = arg[1] or "both"
+local ifaces = {}
+if target == "ra0" then ifaces = {"ra0"}
+elseif target == "rai0" then ifaces = {"rai0"}
+else ifaces = {"ra0", "rai0"} end
+
+local res = { ok = true, scan = {} }
+for _, ifc in ipairs(ifaces) do
+	local ok_s, aplist = pcall(mtkwifi.scan_ap, ifc)
+	local counts = {}
+	local slim = {}
+	if ok_s and type(aplist) == "table" then
+		for _, ap in ipairs(aplist) do
+			local ch = tostring(ap.channel or "")
+			if ch ~= "" then
+				counts[ch] = (counts[ch] or 0) + 1
+			end
+			if #slim < 40 then
+				table.insert(slim, {
+					ch = tonumber(ap.channel) or 0,
+					ssid = ap.ssid or "",
+					bssid = ap.bssid or "",
+					rssi = tonumber(ap.rssi) or 0,
+					sec = ap.security or ""
+				})
+			end
+		end
+	end
+	res.scan[ifc] = { channels = counts, aps = slim }
+end
+print(json.stringify(res))
+LUA
+}
+
+wifi_apply() {
+	jfile="$1"; timeout="${2:-180}"
+	[ -f "$jfile" ] || die "missing wifi config json file"
+	# Build /tmp/aw1000-wifi-apply.sh from JSON using lua
+	lua - "$jfile" > /tmp/aw1000-wifi-apply.sh <<'LUA'
+local json = require("luci.jsonc")
+local f = io.open(arg[1], "r")
+if not f then os.exit(1) end
+local data = json.parse(f:read("*a"))
+f:close()
+if not data then os.exit(1) end
+
+local function sanitize(v)
+	return tostring(v or ""):gsub("[\r\n]", "")
+end
+
+local function set_key(file, k, v)
+	v = sanitize(v)
+	local escaped = v:gsub("'", "'\\''")
+	print(string.format("if grep -q '^%s=' %s; then sed -i 's|^%s=.*|%s=%s|' %s; else echo '%s=%s' >> %s; fi",
+		k, file, k, k, escaped:gsub("[|&\\]", "\\%0"), file, k, escaped, file))
+end
+
+print("#!/bin/sh")
+print("set -e")
+local map = { ra0 = "/etc/wireless/mediatek/mt7915.1.dat", rai0 = "/etc/wireless/mediatek/mt7915.2.dat" }
+for ifc, dfile in pairs(map) do
+	local cfg = data[ifc]
+	if type(cfg) == "table" then
+		if cfg.radio ~= nil then set_key(dfile, "RadioOn", tonumber(cfg.radio) == 1 and "1" or "0") end
+		if cfg.ssid and #cfg.ssid >= 1 and #cfg.ssid <= 32 then set_key(dfile, "SSID1", cfg.ssid) end
+		if cfg.key and #cfg.key >= 8 and #cfg.key <= 63 then set_key(dfile, "WPAPSK1", cfg.key) end
+		if cfg.hidden ~= nil then set_key(dfile, "HideSSID", tonumber(cfg.hidden) == 1 and "1" or "0") end
+		if cfg.ch ~= nil then
+			local ch = tonumber(cfg.ch) or 0
+			set_key(dfile, "Channel", tostring(ch))
+			set_key(dfile, "AutoChannelSelect", ch == 0 and "3" or "0")
+		end
+		if cfg.bw ~= nil then
+			local bw = tonumber(cfg.bw) or 20
+			if bw == 20 then set_key(dfile, "HT_BW", "0"); set_key(dfile, "VHT_BW", "0")
+			elseif bw == 40 then set_key(dfile, "HT_BW", "1"); set_key(dfile, "VHT_BW", "0")
+			elseif bw == 80 then set_key(dfile, "HT_BW", "1"); set_key(dfile, "VHT_BW", "1")
+			elseif bw == 160 then set_key(dfile, "HT_BW", "1"); set_key(dfile, "VHT_BW", "2") end
+		end
+		if cfg.acl_policy ~= nil then
+			local pol = tonumber(cfg.acl_policy) or 0
+			if pol >= 0 and pol <= 2 then set_key(dfile, "AccessPolicy0", tostring(pol)) end
+		end
+		if cfg.acl_list ~= nil then
+			local macs = {}
+			for m in tostring(cfg.acl_list):gmatch("%x%x:%x%x:%x%x:%x%x:%x%x:%x%x") do
+				table.insert(macs, m:lower())
+			end
+			set_key(dfile, "AccessControlList0", table.concat(macs, ";"))
+		end
+	end
+end
+print("wifi reload >/dev/null 2>&1 || wifi restart >/dev/null 2>&1")
+LUA
+	[ $? -eq 0 ] || die "invalid wifi json payload"
+	chmod +x /tmp/aw1000-wifi-apply.sh
+	$DEADMAN start \
+		--files /etc/wireless/mediatek/mt7915.1.dat,/etc/wireless/mediatek/mt7915.2.dat \
+		--apply /tmp/aw1000-wifi-apply.sh \
+		--restore-cmd "wifi reload >/dev/null 2>&1 || wifi restart >/dev/null 2>&1" \
+		--commit-timeout "$timeout"
+}
+
+# ---------- VNSTAT ----------
+vnstat_get() {
+	if ! uci -q get vnstat.@vnstat[0].interface | grep -qw ccmni2; then
+		uci -q add_list vnstat.@vnstat[0].interface='ccmni2'
+		uci -q commit vnstat
+		/usr/bin/vnstat --add -i ccmni2 >/dev/null 2>&1 || /usr/bin/vnstat -u -i ccmni2 >/dev/null 2>&1 || true
+		/etc/init.d/vnstat reload >/dev/null 2>&1 || /etc/init.d/vnstat restart >/dev/null 2>&1 || true
+	fi
+	/usr/bin/vnstat -i ccmni2 --json 2>/dev/null || /usr/bin/vnstat --json 2>/dev/null || echo '{"error":"vnstat unavailable"}'
+}
+
+# ---------- SMS ----------
+sms_list() {
+	store="${1:-$(uci -q get 3ginfo.$(uci_3g_sec).sms_storage)}"
+	store="${store:-SM}"
+	lua - "$store" <<'LUA'
+local json = require("luci.jsonc")
+local store = (arg[1] or "SM"):upper()
+if not store:match("^(SM|ME|MT|SR)$") then store = "SM" end
+
+local function run_read(cmd)
+	local p = io.popen(cmd .. " 2>/dev/null")
+	if not p then return "" end
+	local out = p:read("*a") or ""
+	p:close()
+	return out
+end
+
+-- Query storage status
+local cpms_raw = run_read(string.format("/usr/share/3ginfo-lite/sms-mtk-at.sh %s 'AT+CPMS?'", store))
+local st_name, st_used, st_total = cpms_raw:match('%+CPMS:%s*"?(%u%u)"?%s*,%s*(%d+)%s*,%s*(%d+)')
+
+-- Read inbox PDUs
+local cmgl_raw = run_read(string.format("/usr/share/3ginfo-lite/sms-mtk-at.sh %s 'AT+CMGL=4'", store))
+local raw_msgs = {}
+local cur = nil
+for line in cmgl_raw:gsub("\r", "\n"):gmatch("[^\n]+") do
+	line = line:match("^%s*(.-)%s*$")
+	if line:find("^%+CMGL:") then
+		if cur and cur.pdu ~= "" then table.insert(raw_msgs, cur) end
+		local idx = tonumber(line:match("%+CMGL:%s*(%d+)")) or 0
+		cur = { index = idx, pdu = "" }
+	elseif cur and line:match("^[0-9A-Fa-f]+$") then
+		cur.pdu = line
+	end
+end
+if cur and cur.pdu ~= "" then table.insert(raw_msgs, cur) end
+
+-- Decode each PDU via sms-forward.lua --decode
+local decoded = {}
+local grouped = {}
+for _, item in ipairs(raw_msgs) do
+	local d_out = run_read(string.format("/usr/bin/lua /usr/share/3ginfo-lite/sms-forward.lua --decode '%s' %d", item.pdu, item.index))
+	local sender = d_out:match("SENDER=([^\n]*)") or "-"
+	local ts = d_out:match("TIME=([^\n]*)") or "-"
+	local content = (d_out:match("CONTENT=([^\n]*)") or ""):gsub("\\n", "\n")
+	local part, total, ref = d_out:match("CONCAT=(%d+)/(%d+)%s+REF=(%d+)")
+	local msg = {
+		index = item.index,
+		indexes = { item.index },
+		sender = sender,
+		time = ts,
+		content = content,
+		part = tonumber(part),
+		total = tonumber(total),
+		ref = tonumber(ref)
+	}
+	if msg.ref and msg.total and msg.total > 1 then
+		local key = sender .. ":" .. tostring(msg.ref) .. ":" .. tostring(msg.total)
+		grouped[key] = grouped[key] or {}
+		table.insert(grouped[key], msg)
+	else
+		table.insert(decoded, msg)
+	end
+end
+
+for _, parts in pairs(grouped) do
+	table.sort(parts, function(a, b) return (a.part or 0) < (b.part or 0) end)
+	local first = parts[1]
+	local idxs = {}
+	local texts = {}
+	for _, p in ipairs(parts) do
+		table.insert(idxs, p.index)
+		table.insert(texts, p.content or "")
+	end
+	table.insert(decoded, {
+		index = first.index,
+		indexes = idxs,
+		sender = first.sender,
+		time = first.time,
+		content = table.concat(texts, "")
+	})
+end
+
+table.sort(decoded, function(a, b)
+	if a.time ~= b.time then return (a.time or "") > (b.time or "") end
+	return (a.index or 0) > (b.index or 0)
+end)
+
+-- Read outbox
+local outbox = {}
+local ob_raw = run_read("/usr/share/3ginfo-lite/sms-outbox.sh list")
+for line in ob_raw:gmatch("[^\n]+") do
+	if line ~= "SMS_OUTBOX_V1" and line ~= "" then
+		local id, src, ts, rec_b64, cnt_b64, parts = line:match("^([^\t]+)\t([^\t]+)\t([^\t]+)\t([^\t]+)\t([^\t]+)\t([^\t]+)$")
+		if id then
+			table.insert(outbox, {
+				id = id,
+				source = src,
+				timestamp = tonumber(ts) or 0,
+				recipient_b64 = rec_b64,
+				content_b64 = cnt_b64,
+				parts = tonumber(parts) or 1
+			})
+		end
+	end
+end
+
+print(json.stringify({
+	ok = true,
+	storage = {
+		selected = store,
+		active = st_name or store,
+		used = tonumber(st_used),
+		total = tonumber(st_total)
+	},
+	inbox = decoded,
+	outbox = outbox
+}))
+LUA
+}
+
+sms_send() {
+	num_arg="$1"; text_b64="$2"; store="${3:-SM}"
+	[ -n "$num_arg" ] && [ -n "$text_b64" ] || die "usage: sms-send <number> <text_b64> [SM|ME]"
+	text="$(printf '%s' "$text_b64" | base64 -d 2>/dev/null)"
+	[ -n "$text" ] || die "invalid base64 message text"
+	pdus="$(/usr/bin/lua /usr/share/3ginfo-lite/sms-forward.lua --encode "$num_arg" "$text" 2>/dev/null)"
+	[ -n "$pdus" ] || die "failed to encode SMS PDU"
+	parts=0
+	for pdu in $pdus; do
+		out="$(/usr/share/3ginfo-lite/sms-mtk-send.sh --sync "$pdu" "$store" 2>&1)"
+		rc=$?
+		[ $rc -eq 0 ] || die "sms send failed: $out"
+		parts=$((parts + 1))
+	done
+	rec_b64="$(printf '%s' "$num_arg" | base64 | tr -d '\r\n')"
+	id="app-$(date +%s)-$$"
+	/usr/share/3ginfo-lite/sms-outbox.sh add "$id" manual "$(date +%s)" "$rec_b64" "$text_b64" "$parts" >/dev/null 2>&1 || true
+	printf '{"ok":true,"parts":%s,"id":%s}\n' "$parts" "$(js "$id")"
+}
+
+sms_delete() {
+	store="${1:-SM}"; idxs="$2"
+	[ -n "$idxs" ] || die "missing message indexes"
+	deleted=0
+	IFS=','; for idx in $idxs; do
+		case "$idx" in ''|*[!0-9]*) continue ;; esac
+		/usr/share/3ginfo-lite/sms-mtk-at.sh "$store" "AT+CMGD=$idx" >/dev/null 2>&1 && deleted=$((deleted + 1))
+	done; unset IFS
+	printf '{"ok":true,"deleted":%s}\n' "$deleted"
+}
+
+sms_outbox_del() {
+	target="$1"
+	[ -n "$target" ] || die "missing outbox id or 'all'"
+	if [ "$target" = "all" ]; then
+		/usr/share/3ginfo-lite/sms-outbox.sh clear >/dev/null 2>&1 || die "failed to clear outbox"
+	else
+		/usr/share/3ginfo-lite/sms-outbox.sh delete "$target" >/dev/null 2>&1 || die "failed to delete outbox item"
+	fi
+	echo '{"ok":true}'
+}
+
+# ---------- BACKUPS ----------
+backup_list() {
+	M=/mnt/sda1
+	mounted=false; grep -q " $M " /proc/mounts && mounted=true
+	set -- $(df -k "$M" 2>/dev/null | awk 'NR==2{print $2, $3, $4}')
+	printf '{"ok":true,"mounted":%s,"total_kb":%s,"used_kb":%s,"avail_kb":%s,"items":[' \
+		"$mounted" "$(num "$1")" "$(num "$2")" "$(num "$3")"
+	f=1
+	if [ "$mounted" = true ]; then
+		for p in "$M"/backup-*.tar.gz "$M"/aw1000_backups/*.tar.gz "$M"/aw1000-backup-*/*.tar.gz "$M"/AW1000-fw-*; do
+			[ -e "$p" ] || continue
+			[ $f = 1 ] || printf ','; f=0
+			sz="$(du -sk "$p" 2>/dev/null | awk '{print $1}')"
+			mt="$(date -r "$p" '+%F %T' 2>/dev/null)"
+			kind="config"
+			[ -d "$p" ] && kind="partitions"
+			printf '{"path":%s,"name":%s,"kind":%s,"size_kb":%s,"mtime":%s}' \
+				"$(js "$p")" "$(js "${p#$M/}")" "$(js "$kind")" "$(num "$sz")" "$(js "$mt")"
+		done
+	fi
+	printf ']}\n'
+}
+
+backup_create() {
+	M=/mnt/sda1
+	grep -q " $M " /proc/mounts || die "USB drive /mnt/sda1 is not mounted"
+	mkdir -p "$M/aw1000_backups"
+	tag="${1:-manual}"
+	tag="$(printf '%s' "$tag" | tr -cd 'A-Za-z0-9_-')"
+	ts="$(date '+%Y%m%d-%H%M%S')"
+	out="$M/aw1000_backups/backup-aw1000-${ts}-${tag}.tar.gz"
+	sysupgrade -b "$out" >/dev/null 2>&1 || tar -czf "$out" /etc/config /etc/firewall.user /etc/wireless/mediatek/*.dat 2>/dev/null || die "backup creation failed"
+	sha="$(sha256sum "$out" | awk '{print $1}')"
+	echo "$sha  $(basename "$out")" > "${out}.sha256"
+	sz="$(du -sk "$out" | awk '{print $1}')"
+	printf '{"ok":true,"path":%s,"size_kb":%s,"sha256":%s}\n' "$(js "$out")" "$(num "$sz")" "$(js "$sha")"
+}
+
+backup_verify() {
+	p="$1"
+	case "$p" in /mnt/sda1/*) ;; *) die "path must be under /mnt/sda1" ;; esac
+	[ -e "$p" ] || die "backup not found"
+	if [ -d "$p" ] && [ -f "$p/SHA256SUMS" ]; then
+		( cd "$p" && sha256sum -c SHA256SUMS >/dev/null 2>&1 ) && echo '{"ok":true,"verified":"sha256sums"}' || die "SHA256SUMS check failed"
+		return
+	fi
+	if [ -f "${p}.sha256" ]; then
+		actual="$(sha256sum "$p" | awk '{print $1}')"
+		expected="$(awk '{print $1}' "${p}.sha256")"
+		[ "$actual" = "$expected" ] || die "SHA256 mismatch"
+	fi
+	tar -tzf "$p" >/dev/null 2>&1 || die "tar archive corrupt"
+	sha="$(sha256sum "$p" | awk '{print $1}')"
+	printf '{"ok":true,"verified":"tar+sha256","sha256":%s}\n' "$(js "$sha")"
+}
+
+backup_delete() {
+	p="$1"
+	case "$p" in
+		/mnt/sda1/AW1000-fw-*) die "refusing to delete raw firmware partition backup" ;;
+		/mnt/sda1/*.tar.gz|/mnt/sda1/aw1000_backups/*.tar.gz)
+			[ -f "$p" ] || die "file not found"
+			rm -f "$p" "${p}.sha256"
+			echo '{"ok":true}'
+			;;
+		*) die "refusing to delete path outside allowed backup tarballs" ;;
+	esac
+}
+
+# ---------- DIAGNOSTICS, FIREWALL, LOGS, POWER ----------
+diag_run() {
+	tool="$1"; target="$2"
+	case "$target" in ''|*[!A-Za-z0-9._:-]*) die "invalid target host/IP" ;; esac
+	case "$tool" in
+		ping)
+			out="$(ping -c 4 -W 2 "$target" 2>&1)"
+			rc=$? ;;
+		traceroute)
+			out="$(traceroute -n -w 2 -m 15 "$target" 2>&1)"
+			rc=$? ;;
+		nslookup)
+			out="$(nslookup "$target" 2>&1)"
+			rc=$? ;;
+		*) die "unknown diag tool: $tool" ;;
+	esac
+	printf '{"ok":%s,"tool":%s,"target":%s,"output":%s}\n' \
+		"$([ $rc -eq 0 ] && echo true || echo false)" "$(js "$tool")" "$(js "$target")" "$(js "$out")"
+}
+
+fw_check() {
+	v4_tcp="$(iptables -t raw -L PREROUTING -v -n 2>/dev/null | awk '/aw1000-block-vendor-ports / {print $1+0; exit}')"
+	v4_udp="$(iptables -t raw -L PREROUTING -v -n 2>/dev/null | awk '/aw1000-block-vendor-ports-udp/ {print $1+0; exit}')"
+	v6_tcp="$(ip6tables -L INPUT -v -n 2>/dev/null | awk '/dports 23,17171,8000,8080,3517,10240/ && $4=="tcp" {print $1+0; exit}')"
+	v6_udp="$(ip6tables -L INPUT -v -n 2>/dev/null | awk '/dports 23,17171,8000,8080,3517,10240/ && $4=="udp" {print $1+0; exit}')"
+	ok=false
+	[ -n "$v4_tcp" ] && [ -n "$v4_udp" ] && [ -n "$v6_tcp" ] && [ -n "$v6_udp" ] && ok=true
+	printf '{"ok":%s,"ports":[23,17171,8000,8080,3517,10240],"v4_tcp_drops":%s,"v4_udp_drops":%s,"v6_tcp_drops":%s,"v6_udp_drops":%s}\n' \
+		"$ok" "$(num "$v4_tcp")" "$(num "$v4_udp")" "$(num "$v6_tcp")" "$(num "$v6_udp")"
+}
+
+logs_get() {
+	cat_filter="${1:-all}"; hide_noise="${2:-1}"; n="${3:-100}"
+	case "$n" in *[!0-9]*|'') n=100 ;; esac
+	[ "$n" -gt 500 ] && n=500
+	src="/data/syslog.log"
+	[ -f "$src" ] || src=""
+	raw="$(if [ -n "$src" ]; then tail -n 1000 "$src"; else logread; fi)"
+	if [ "$hide_noise" = "1" ]; then
+		raw="$(printf '%s\n' "$raw" | grep -vE 'ra1/operstate|fibocom-nw-status-app.*test\.\.\.|\[SPM\] MCUSYSOFF|tick broadcast enter|kick watchdog|ccci_poll1|received MD status response|poll MD status wait done|\[ATCI\].*readline\(\)|getStorageRemainSize|check storage remain size')"
+	fi
+	case "$cat_filter" in
+		modem) raw="$(printf '%s\n' "$raw" | grep -iE 'mipc|modem|3ginfo|ccci|ccmni|sim|ims')" ;;
+		wifi)  raw="$(printf '%s\n' "$raw" | grep -iE 'wifi|ra0|rai0|mt7915|80211|sta|mac_table')" ;;
+		vpn)   raw="$(printf '%s\n' "$raw" | grep -iE 'netbird|tailscale|wt0|wireguard|deadman')" ;;
+		auth)  raw="$(printf '%s\n' "$raw" | grep -iE 'dropbear|uhttpd|login|auth|password')" ;;
+	esac
+	printf '{"ok":true,"lines":['
+	f=1
+	printf '%s\n' "$raw" | tail -n "$n" | while IFS= read -r line; do
+		[ -n "$line" ] || continue
+		[ $f = 1 ] || printf ','; f=0
+		printf '%s' "$(js "$line")"
+	done
+	printf ']}\n'
+}
+
+power_ctl() {
+	act="$1"; arg="$2"
+	case "$act" in
+		modem-restart)
+			radio_cycle
+			echo '{"ok":true,"action":"modem-restart"}' ;;
+		reboot)
+			( sleep 2; /sbin/reboot ) </dev/null >/dev/null 2>&1 &
+			echo '{"ok":true,"action":"reboot"}' ;;
+		schedule-get)
+			cur="$(crontab -l 2>/dev/null | grep '# aw1000-scheduled-reboot' | sed 's/ \/sbin\/reboot.*//')"
+			printf '{"ok":true,"enabled":%s,"cron":%s}\n' "$([ -n "$cur" ] && echo true || echo false)" "$(js "$cur")" ;;
+		schedule-set)
+			crontab -l 2>/dev/null | grep -v '# aw1000-scheduled-reboot' > /tmp/cron.aw1000
+			if [ -n "$arg" ] && [ "$arg" != "off" ]; then
+				echo "$arg /sbin/reboot # aw1000-scheduled-reboot" >> /tmp/cron.aw1000
+			fi
+			crontab /tmp/cron.aw1000
+			rm -f /tmp/cron.aw1000
+			/etc/init.d/cron reload >/dev/null 2>&1 || true
+			printf '{"ok":true,"cron":%s}\n' "$(js "$arg")" ;;
+		*) die "unknown power action: $act" ;;
+	esac
+}
+
+case "$1" in
+	--version)        echo "$VERSION" ;;
+	modem-get)        modem_get ;;
+	modem-mode)       shift; modem_mode "$@" ;;
+	band-lock)        shift; band_lock "$@" ;;
+	cell-scan)        cell_scan ;;
+	cell-lock)        shift; cell_lock "$@" ;;
+	apn-set)          shift; apn_set "$@" ;;
+	ttl-set)          shift; ttl_set "$@" ;;
+	modem-restart)    radio_cycle; echo '{"ok":true}' ;;
+	wan-restart)      /sbin/ifup wan >/dev/null 2>&1 & echo '{"ok":true}' ;;
+	wifi-get)         wifi_get ;;
+	wifi-scan)        shift; wifi_scan "$@" ;;
+	wifi-apply)       shift; wifi_apply "$@" ;;
+	vnstat-get)       vnstat_get ;;
+	sms-list)         shift; sms_list "$@" ;;
+	sms-send)         shift; sms_send "$@" ;;
+	sms-delete)       shift; sms_delete "$@" ;;
+	sms-outbox-del)   shift; sms_outbox_del "$@" ;;
+	backup-list)      backup_list ;;
+	backup-create)    shift; backup_create "$@" ;;
+	backup-verify)    shift; backup_verify "$@" ;;
+	backup-delete)    shift; backup_delete "$@" ;;
+	diag)             shift; diag_run "$@" ;;
+	fw-check)         fw_check ;;
+	logs)             shift; logs_get "$@" ;;
+	power)            shift; power_ctl "$@" ;;
+	*) echo "usage: $0 --version|modem-get|modem-mode|band-lock|cell-scan|cell-lock|apn-set|ttl-set|modem-restart|wan-restart|wifi-get|wifi-scan|wifi-apply|vnstat-get|sms-list|sms-send|sms-delete|sms-outbox-del|backup-list|backup-create|backup-verify|backup-delete|diag|fw-check|logs|power" >&2; exit 2 ;;
+esac

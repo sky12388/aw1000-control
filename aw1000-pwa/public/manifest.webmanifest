@@ -1,0 +1,19 @@
+{
+  "name": "AW1000 Control — Ultra 5G Router",
+  "short_name": "AW1000 5G",
+  "description": "Local LAN (192.168.1.1) and Remote VPN PWA controller for the AW1000 Ultra 5G Router",
+  "start_url": "/app/index.html",
+  "scope": "/app/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#F7F8FC",
+  "theme_color": "#FF3B5C",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
