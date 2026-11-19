@@ -11,7 +11,7 @@
 #   Option A (from local tarball):
 #     sh install.sh /tmp/aw1000-control-router-v1.0.4.tar.gz
 #   Option B (from GitHub Release URL):
-#     TAR_URL="https://github.com/<user>/aw1000-control/releases/latest/download/aw1000-control-router-v1.0.4.tar.gz" sh install.sh
+#     TAR_URL="https://github.com/sky12388/aw1000-control/releases/latest/download/aw1000-control-router-v1.0.4.tar.gz" sh install.sh
 # ==============================================================================
 set -e
 

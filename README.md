@@ -2,8 +2,8 @@
 
 Lightweight, RGB-accented **OpenWrt Progressive Web App (`/www/app/`)** and **645 KB Native Android WebView Companion APK** for managing the **Arcadyan / Telstra AW1000 Ultra 5G Router** locally (`192.168.1.1`) or remotely over NetBird, Tailscale, WireGuard, or ZeroTier.
 
-- **Landing Page & Downloads:** `https://eddiealexander77.github.io/aw1000-control/`
-- **GitHub Releases:** `https://github.com/eddiealexander77/aw1000-control/releases`
+- **Landing Page & Downloads:** `https://sky12388.github.io/aw1000-control/`
+- **GitHub Releases:** `https://github.com/sky12388/aw1000-control/releases`
 
 ## Repository Structure
 - [`aw1000-pwa/`](aw1000-pwa/) — Zero-dependency Progressive Web App (`~33.5 KB` gzipped JS, `~6.4 KB` gzipped CSS) + `rpcd` ACL (`aw1000-pwa.json`), `rpcd` helper (`aw1000`), and native Lua JSON-RPC gateway (`aw1000-cgi-ubus`).
