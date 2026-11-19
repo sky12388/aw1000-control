@@ -11,8 +11,8 @@ PWA_DIR="$(cd "$ROOT_DIR/../aw1000-pwa" && pwd)"
 SDK_DIR="${ANDROID_HOME:-$HOME/Android/Sdk}"
 BUILD_TOOLS="$SDK_DIR/build-tools/36.0.0"
 ANDROID_JAR="$SDK_DIR/platforms/android-36/android.jar"
-GRADLE_LIB="${GRADLE_LIB:-$(find "$HOME/.gradle/wrapper/dists" -maxdepth 4 -type d -name lib 2>/dev/null | head -n1)}"
-KOTLIN_STDLIB="$GRADLE_LIB/kotlin-stdlib-2.2.21.jar"
+GRADLE_LIB="${GRADLE_LIB:-$(find "$HOME/.gradle/wrapper/dists" -maxdepth 4 -type d -name lib 2>/dev/null | sort -V | tail -n1)}"
+KOTLIN_STDLIB="$(find "$GRADLE_LIB" -maxdepth 1 -name 'kotlin-stdlib-*.jar' ! -name '*jdk*' ! -name '*common*' 2>/dev/null | sort -V | tail -n1)"
 
 BUILD_DIR="$ROOT_DIR/app/build"
 CLASSES_DIR="$BUILD_DIR/intermediates/classes"
@@ -24,6 +24,33 @@ OUT_DIR="$BUILD_DIR/outputs/apk/release"
 RELEASE_APK="$OUT_DIR/app-release.apk"
 TOP_APK="$ROOT_DIR/aw1000-control-release.apk"
 KEYSTORE="$ROOT_DIR/aw1000-release.jks"
+VERSION_FILE="$ROOT_DIR/VERSION"
+
+# Auto-bump versionCode and patch versionName on every build (pass --no-bump to skip)
+if [ ! -f "$VERSION_FILE" ]; then
+  printf 'VERSION_CODE=5\nVERSION_NAME=1.0.4\n' > "$VERSION_FILE"
+fi
+# shellcheck source=/dev/null
+. "$VERSION_FILE"
+if [ "${1:-}" != "--no-bump" ]; then
+  VERSION_CODE=$((VERSION_CODE + 1))
+  IFS='.' read -r V_MAJ V_MIN V_PAT <<EOF
+$VERSION_NAME
+EOF
+  V_PAT=$(( ${V_PAT:-0} + 1 ))
+  VERSION_NAME="${V_MAJ}.${V_MIN}.${V_PAT}"
+  printf 'VERSION_CODE=%s\nVERSION_NAME=%s\n' "$VERSION_CODE" "$VERSION_NAME" > "$VERSION_FILE"
+  sed -i -E \
+    -e "s/android:versionCode=\"[0-9]+\"/android:versionCode=\"${VERSION_CODE}\"/" \
+    -e "s/android:versionName=\"[^\"]+\"/android:versionName=\"${VERSION_NAME}\"/" \
+    "$ROOT_DIR/app/src/main/AndroidManifest.xml"
+  sed -i -E \
+    -e "s/versionCode = [0-9]+/versionCode = ${VERSION_CODE}/" \
+    -e "s/versionName = \"[^\"]+\"/versionName = \"${VERSION_NAME}\"/" \
+    "$ROOT_DIR/app/build.gradle.kts"
+fi
+VERSIONED_APK="$ROOT_DIR/aw1000-control-v${VERSION_NAME}.apk"
+echo ">>> Building AW1000 Control WPWA v${VERSION_NAME} (versionCode ${VERSION_CODE}) <<<"
 
 echo "[1/6] Building AW1000 Control PWA (dist/)..."
 npm --prefix "$PWA_DIR" run build >/dev/null
@@ -40,8 +67,8 @@ echo "[2/6] Compiling Android resources with aapt2..."
   --manifest "$ROOT_DIR/app/src/main/AndroidManifest.xml" \
   --min-sdk-version 26 \
   --target-sdk-version 36 \
-  --version-code 5 \
-  --version-name "1.0.4" \
+  --version-code "$VERSION_CODE" \
+  --version-name "$VERSION_NAME" \
   -o "$UNALIGNED_APK" \
   "$RES_ZIP"
 
@@ -100,14 +127,16 @@ fi
 
 "$BUILD_TOOLS/apksigner" verify --verbose "$RELEASE_APK" | head -n 6
 cp -f "$RELEASE_APK" "$TOP_APK"
+cp -f "$RELEASE_APK" "$VERSIONED_APK"
 
 APK_BYTES=$(stat -c%s "$TOP_APK")
 APK_MB=$(awk -v b="$APK_BYTES" 'BEGIN{printf "%.2f MB (%d KB)", b/1048576, b/1024}')
 
 echo "=============================================================="
-echo " AW1000 Control Android APK — Build Complete"
+echo " AW1000 Control Android APK — Build Complete (v${VERSION_NAME} / code ${VERSION_CODE})"
 echo "=============================================================="
 echo " APK Output 1 : $TOP_APK"
-echo " APK Output 2 : $RELEASE_APK"
+echo " APK Output 2 : $VERSIONED_APK"
+echo " APK Output 3 : $RELEASE_APK"
 echo " Final Size   : $APK_MB (Target: < 5.00 MB) [PASS]"
 echo "=============================================================="

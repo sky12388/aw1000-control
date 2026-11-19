@@ -1218,7 +1218,7 @@ function renderSmsUssdScreen() {
             <div class="card-icon signal">${ICONS.sms}</div>
             <div class="card-title-text min-w-0">
               <h1 class="card-title">SIM SMS Messages (${state.smsList.length})</h1>
-              <p class="card-subtitle">Decoded from FG360 PDU storage (<code class="mono">aw1000.sms_list</code>)</p>
+              <p class="card-subtitle">Decoded from FG360 ME + SIM PDU storage (<code class="mono">aw1000.sms_list</code>)</p>
             </div>
           </div>
           <button class="icon-btn shrink-0" data-action="refresh-sms">${ICONS.refresh} Refresh</button>
@@ -2668,10 +2668,11 @@ async function refreshTabSpecificLive(tab) {
       const [res] = await ubusBatchCall([{ object: "aw1000", method: "sms_list" }]);
       if (res?.data && Array.isArray(res.data.inbox)) {
         state.smsList = res.data.inbox.map((m, i) => ({
-          id: "live_sms_" + (m.index ?? i),
+          id: "live_sms_" + (m.storage || "MT") + "_" + (m.index ?? i),
           sender: m.sender || "SIM",
           time: m.time || "",
-          unread: false,
+          unread: Boolean(m.unread),
+          storage: m.storage || "",
           text: m.content || ""
         }));
         render();

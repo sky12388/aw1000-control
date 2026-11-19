@@ -11,8 +11,8 @@ android {
         applicationId = "com.aw1000.control"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 6
+        versionName = "1.0.5"
     }
 
     buildTypes {

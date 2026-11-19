@@ -9,9 +9,9 @@
 #
 # Usage on the AW1000 router:
 #   Option A (from local tarball):
-#     sh install.sh /tmp/aw1000-control-router-v1.0.4.tar.gz
+#     sh install.sh /tmp/aw1000-control-router-v1.0.5.tar.gz
 #   Option B (from GitHub Release URL):
-#     TAR_URL="https://github.com/sky12388/aw1000-control/releases/latest/download/aw1000-control-router-v1.0.4.tar.gz" sh install.sh
+#     TAR_URL="https://github.com/sky12388/aw1000-control/releases/latest/download/aw1000-control-router-v1.0.5.tar.gz" sh install.sh
 # ==============================================================================
 set -e
 
@@ -64,5 +64,5 @@ rm -f "$TMP_TAR"
 echo "=============================================================="
 echo " AW1000 Control installed successfully!"
 echo " Open on LAN : https://192.168.1.1/app/"
-echo " Or install AW1000-Control-v1.0.4.apk on your Android phone."
+echo " Or install AW1000-Control-v1.0.5.apk on your Android phone."
 echo "=============================================================="

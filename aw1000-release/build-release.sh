@@ -9,12 +9,16 @@
 # ==============================================================================
 set -euo pipefail
 
-VERSION="1.0.4"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PWA_DIR="$ROOT/aw1000-pwa"
 APK_DIR="$ROOT/aw1000-apk"
 REL_DIR="$ROOT/aw1000-release"
 WORK="/tmp/aw1000-release-build"
+if [ -f "$APK_DIR/VERSION" ]; then
+  # shellcheck source=/dev/null
+  . "$APK_DIR/VERSION"
+fi
+VERSION="${VERSION_NAME:-1.0.5}"
 
 rm -rf "$WORK"
 mkdir -p "$WORK/data/www/app" \

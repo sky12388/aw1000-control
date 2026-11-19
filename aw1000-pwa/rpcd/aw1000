@@ -177,8 +177,148 @@ case "$1" in
 				;;
 
 			sms_list)
-				if [ -x "$CTL" ]; then
-					"$CTL" sms-list
+				if [ -x /usr/share/3ginfo-lite/sms-mtk-at.sh ] && [ -f /usr/share/3ginfo-lite/sms-forward.lua ]; then
+					lua - <<'LUA'
+local json = require("luci.jsonc")
+
+local function run_read(cmd)
+	local p = io.popen(cmd .. " 2>/dev/null")
+	if not p then return "" end
+	local out = p:read("*a") or ""
+	p:close()
+	return out
+end
+
+local stores = { "ME", "SM" }
+local stats = {}
+local raw_msgs = {}
+local total_used, total_cap = 0, 0
+
+for _, st in ipairs(stores) do
+	local cmgl_raw = run_read(string.format("/usr/share/3ginfo-lite/sms-mtk-at.sh %s 'AT+CMGL=4'", st))
+	local cpms_raw = run_read(string.format("/usr/share/3ginfo-lite/sms-mtk-at.sh %s 'AT+CPMS?'", st))
+	local _, used, cap = cpms_raw:match('%+CPMS:%s*"?(%u%u)"?%s*,%s*(%d+)%s*,%s*(%d+)')
+	used = tonumber(used) or 0
+	cap = tonumber(cap) or 0
+	stats[st:lower()] = { used = used, total = cap }
+	total_used = total_used + used
+	total_cap = total_cap + cap
+
+	local cur = nil
+	for line in cmgl_raw:gsub("\r", "\n"):gmatch("[^\n]+") do
+		line = line:match("^%s*(.-)%s*$")
+		if line:find("^%+CMGL:") then
+			if cur and cur.pdu ~= "" then table.insert(raw_msgs, cur) end
+			local idx, stat = line:match("%+CMGL:%s*(%d+)%s*,%s*(%d+)")
+			idx = tonumber(idx) or tonumber(line:match("%+CMGL:%s*(%d+)")) or 0
+			stat = tonumber(stat)
+			cur = { index = idx, stat = stat, storage = st, pdu = "" }
+		elseif cur and line:match("^[0-9A-Fa-f]+$") then
+			cur.pdu = line
+		end
+	end
+	if cur and cur.pdu ~= "" then table.insert(raw_msgs, cur) end
+end
+
+-- Always restore persistent incoming SMS storage to ME (modem NVRAM) so SM reads never pin mem3 to SM
+run_read("/usr/share/3ginfo-lite/sms-mtk-at.sh ME 'AT+CPMS=\"ME\",\"ME\",\"ME\"'")
+
+local decoded = {}
+local grouped = {}
+for _, item in ipairs(raw_msgs) do
+	-- Include unread (0) and read (1) received SMS; skip unsent/sent drafts (2/3)
+	if item.stat == nil or item.stat == 0 or item.stat == 1 then
+		local d_out = run_read(string.format("/usr/bin/lua /usr/share/3ginfo-lite/sms-forward.lua --decode '%s' %d", item.pdu, item.index))
+		local sender = d_out:match("SENDER=([^\n]*)") or "-"
+		local ts = d_out:match("TIME=([^\n]*)") or "-"
+		local content = (d_out:match("CONTENT=([^\n]*)") or ""):gsub("\\n", "\n")
+		local part, total, ref = d_out:match("CONCAT=(%d+)/(%d+)%s+REF=(%d+)")
+		local msg = {
+			index = item.index,
+			indexes = { item.index },
+			storage = item.storage,
+			stat = item.stat,
+			unread = (item.stat == 0),
+			sender = sender,
+			time = ts,
+			content = content,
+			part = tonumber(part),
+			total = tonumber(total),
+			ref = tonumber(ref)
+		}
+		if msg.ref and msg.total and msg.total > 1 then
+			local key = item.storage .. ":" .. sender .. ":" .. tostring(msg.ref) .. ":" .. tostring(msg.total)
+			grouped[key] = grouped[key] or {}
+			table.insert(grouped[key], msg)
+		else
+			table.insert(decoded, msg)
+		end
+	end
+end
+
+for _, parts in pairs(grouped) do
+	table.sort(parts, function(a, b) return (a.part or 0) < (b.part or 0) end)
+	local first = parts[1]
+	local idxs = {}
+	local texts = {}
+	local any_unread = false
+	for _, p in ipairs(parts) do
+		table.insert(idxs, p.index)
+		table.insert(texts, p.content or "")
+		if p.unread then any_unread = true end
+	end
+	table.insert(decoded, {
+		index = first.index,
+		indexes = idxs,
+		storage = first.storage,
+		stat = any_unread and 0 or 1,
+		unread = any_unread,
+		sender = first.sender,
+		time = first.time,
+		content = table.concat(texts, "")
+	})
+end
+
+table.sort(decoded, function(a, b)
+	if a.time ~= b.time then return (a.time or "") > (b.time or "") end
+	if a.storage ~= b.storage then return (a.storage or "") < (b.storage or "") end
+	return (a.index or 0) > (b.index or 0)
+end)
+
+local outbox = {}
+local ob_raw = run_read("/usr/share/3ginfo-lite/sms-outbox.sh list")
+for line in ob_raw:gmatch("[^\n]+") do
+	if line ~= "SMS_OUTBOX_V1" and line ~= "" then
+		local id, src, ts, rec_b64, cnt_b64, parts = line:match("^([^\t]+)\t([^\t]+)\t([^\t]+)\t([^\t]+)\t([^\t]+)\t([^\t]+)$")
+		if id then
+			table.insert(outbox, {
+				id = id,
+				source = src,
+				timestamp = tonumber(ts) or 0,
+				recipient_b64 = rec_b64,
+				content_b64 = cnt_b64,
+				parts = tonumber(parts) or 1
+			})
+		end
+	end
+end
+
+print(json.stringify({
+	ok = true,
+	storage = {
+		selected = "ME",
+		active = "ME+SM",
+		used = total_used,
+		total = total_cap,
+		me = stats.me,
+		sm = stats.sm
+	},
+	inbox = decoded,
+	outbox = outbox
+}))
+LUA
+				elif [ -x "$CTL" ]; then
+					"$CTL" sms-list MT
 				else
 					echo '{"ok":true,"inbox":[],"outbox":[]}'
 				fi
