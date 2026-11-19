@@ -6,12 +6,12 @@
 # ==============================================================================
 set -euo pipefail
 
-ROOT_DIR="/home/ma/AW1000/aw1000-apk"
-PWA_DIR="/home/ma/AW1000/aw1000-pwa"
-SDK_DIR="/home/ma/Android/Sdk"
+ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PWA_DIR="$(cd "$ROOT_DIR/../aw1000-pwa" && pwd)"
+SDK_DIR="${ANDROID_HOME:-$HOME/Android/Sdk}"
 BUILD_TOOLS="$SDK_DIR/build-tools/36.0.0"
 ANDROID_JAR="$SDK_DIR/platforms/android-36/android.jar"
-GRADLE_LIB="/home/ma/.gradle/wrapper/dists/gradle-9.3.1-all/9ot9r568e8zfvvd4mn8rbu1j0/gradle-9.3.1/lib"
+GRADLE_LIB="${GRADLE_LIB:-$(find "$HOME/.gradle/wrapper/dists" -maxdepth 4 -type d -name lib 2>/dev/null | head -n1)}"
 KOTLIN_STDLIB="$GRADLE_LIB/kotlin-stdlib-2.2.21.jar"
 
 BUILD_DIR="$ROOT_DIR/app/build"

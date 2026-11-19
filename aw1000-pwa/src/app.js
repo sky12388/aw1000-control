@@ -134,6 +134,14 @@ function isAnyModalOpen() {
   return Boolean(state.endpointModalOpen || state.confirmModal || state.trustModalOpen || state.loginModalOpen);
 }
 
+function isFormFieldFocused() {
+  if (typeof document === "undefined") return false;
+  const el = document.activeElement;
+  if (!el || !el.tagName) return false;
+  const tag = el.tagName.toUpperCase();
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+}
+
 function updateEndpointModalBadgesInPlace() {
   if (!state.endpointModalOpen) return;
   const lanHost = normalizeEndpointHost(state.profileLanInput) || "192.168.1.1";
@@ -311,12 +319,35 @@ function pushToast(message) {
 let audioCtx = null;
 let beeperTimeout = null;
 
+function computeSignalNormalized(cell) {
+  if (!cell) return null;
+  const nrRsrp = (cell.nrRsrp !== null && cell.nrRsrp !== undefined && !isNaN(Number(cell.nrRsrp))) ? Number(cell.nrRsrp) : null;
+  const lteRsrp = (cell.lteRsrp !== null && cell.lteRsrp !== undefined && !isNaN(Number(cell.lteRsrp))) ? Number(cell.lteRsrp) : null;
+  const primaryRsrp = (cell.rsrp !== null && cell.rsrp !== undefined && cell.rsrp !== "" && !isNaN(Number(cell.rsrp))) ? Number(cell.rsrp) : null;
+
+  // Strictly use primary 5G NR RSRP when 5G NR is active (no 4G LTE anchor boost);
+  // fall back to primary/LTE RSRP only when on 4G-only.
+  const hasNr = nrRsrp !== null;
+  const effectiveRsrp = hasNr ? nrRsrp : (primaryRsrp !== null ? primaryRsrp : lteRsrp);
+  if (effectiveRsrp === null) return null;
+
+  const nrSinr = (cell.nrSinr !== null && cell.nrSinr !== undefined && !isNaN(Number(cell.nrSinr))) ? Number(cell.nrSinr) : null;
+  const lteSinr = (cell.lteSinr !== null && cell.lteSinr !== undefined && !isNaN(Number(cell.lteSinr))) ? Number(cell.lteSinr) : null;
+  const primarySinr = (cell.sinr !== null && cell.sinr !== undefined && cell.sinr !== "" && !isNaN(Number(cell.sinr))) ? Number(cell.sinr) : null;
+
+  const effectiveSinr = hasNr ? nrSinr : (primarySinr !== null ? primarySinr : lteSinr);
+
+  // Exact same weighted formula as 3ginfo-lite fg360:
+  // RSRP (-125..-75 dBm, 60%) + SINR (-5..25 dB, 40%)
+  const rsrpNorm = Math.max(0, Math.min(1, (effectiveRsrp + 125) / 50));
+  if (effectiveSinr === null) return rsrpNorm;
+  const sinrNorm = Math.max(0, Math.min(1, (effectiveSinr + 5) / 30));
+  return rsrpNorm * 0.60 + sinrNorm * 0.40;
+}
+
 function computeSignalScore() {
-  const rsrp = Number(state.cellular.rsrp) || -95;
-  const sinr = Number(state.cellular.sinr) || 5;
-  const rsrpNorm = Math.max(0, Math.min(1, (rsrp + 115) / 45));
-  const sinrNorm = Math.max(0, Math.min(1, (sinr + 5) / 35));
-  return rsrpNorm * 0.55 + sinrNorm * 0.45;
+  const norm = computeSignalNormalized(state.cellular);
+  return norm !== null ? norm : 0;
 }
 
 function getCurrentBeeperFreq() {
@@ -452,22 +483,18 @@ const SIGNAL_STEPS = [
   { step: 10, pct: 100, color: "#00E676", glow: "rgba(0, 230, 118, 0.52)",   cls: "excellent", label: "Excellent Signal" }
 ];
 
-function computeSignalStep(rsrp, sinr) {
-  if (rsrp === null || rsrp === undefined || rsrp === "" || isNaN(Number(rsrp))) {
+function computeSignalStep(cell) {
+  const score = computeSignalNormalized(cell);
+  if (score === null) {
     return { step: 0, pct: null, color: "#64748B", glow: "transparent", cls: "poor", label: "No Live Telemetry" };
   }
-  const r = Number(rsrp);
-  const s = Number(sinr);
-  const rsrpVal = Math.max(-120, Math.min(-80, r));
-  // -120 dBm => step 1 (10%), -113 dBm => step 3 (30%), -80 dBm => step 10 (100%)
-  const baseStep = 1 + ((rsrpVal + 120) / 40) * 9;
-  const sinrNudge = (sinr === null || sinr === undefined || isNaN(s)) ? 0 : Math.max(-0.35, Math.min(0.35, (s - 8) * 0.015));
-  const idx = Math.max(1, Math.min(10, Math.round(baseStep + sinrNudge)));
-  return SIGNAL_STEPS[idx - 1];
+  const exactPct = Math.max(10, Math.min(100, Math.round(10 + score * 90)));
+  const idx = Math.max(1, Math.min(10, Math.round(exactPct / 10)));
+  return { ...SIGNAL_STEPS[idx - 1], pct: exactPct };
 }
 
 function renderSignalRingSvg(cell) {
-  const tier = computeSignalStep(cell.rsrp, cell.sinr);
+  const tier = computeSignalStep(cell);
   const pctText = tier.pct !== null ? `${tier.pct}%` : "--%";
   const rsrpText = (cell.rsrp !== null && cell.rsrp !== undefined) ? `${cell.rsrp} dBm` : "-- dBm";
   const sinrText = (cell.sinr !== null && cell.sinr !== undefined) ? `${cell.sinr} dB` : "-- dB";
@@ -921,7 +948,8 @@ function renderWifiRadioCard(key, radio) {
       <div class="form-grid">
         <div class="field">
           <label>SSID Broadcast Name</label>
-          <input class="input" type="text" value="${escapeHtml(radio.ssid)}"
+          <input class="input" type="text" maxlength="32" value="${escapeHtml(radio.ssid)}"
+            placeholder="1-32 characters"
             data-wifi="${key}" data-field="ssid" ${disabled}/>
         </div>
         <div class="field">
@@ -937,17 +965,28 @@ function renderWifiRadioCard(key, radio) {
           </select>
         </div>
         <div class="field">
-          <label>WPA Passphrase</label>
-          <input class="input" type="password" value="${escapeHtml(radio.passphrase)}"
-            data-wifi="${key}" data-field="passphrase" ${disabled}/>
+          <label>New WPA Passphrase (optional)</label>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <input class="input" id="wifiPass_${key}" type="password" autocomplete="new-password" maxlength="63"
+              placeholder="Leave blank to keep current (8-63 chars)"
+              value="${escapeHtml(radio.passphrase || "")}"
+              data-wifi="${key}" data-field="passphrase" style="flex:1; min-width:0;" ${disabled}/>
+            <button type="button" class="icon-btn" data-action="toggle-wifi-pass" data-radio="${key}" ${disabled} title="Show or hide passphrase">Show</button>
+          </div>
         </div>
       </div>
 
       <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
         <span class="card-subtitle mono">Backup: ${escapeHtml(radio.backupFile)}</span>
-        <button class="btn btn-primary-wifi" data-action="apply-wifi" data-radio="${key}" ${disabled}>
-          ${ICONS.refresh} Save .dat &amp; Restart Wi-Fi
-        </button>
+        ${state.editMode ? `
+          <button class="btn btn-primary-wifi" data-action="apply-wifi" data-radio="${key}">
+            ${ICONS.refresh} Save .dat &amp; Restart Wi-Fi
+          </button>
+        ` : `
+          <button class="btn btn-secondary" data-action="toggle-edit-mode">
+            ${ICONS.lock} Unlock Edit Mode to Edit
+          </button>
+        `}
       </div>
     </article>
   `;
@@ -2187,29 +2226,66 @@ function setupEvents() {
         }
       };
       render();
+    } else if (action === "toggle-wifi-pass") {
+      const radioKey = actionEl.getAttribute("data-radio");
+      const inp = document.getElementById(`wifiPass_${radioKey}`);
+      if (inp) {
+        const showing = inp.type === "text";
+        inp.type = showing ? "password" : "text";
+        actionEl.textContent = showing ? "Show" : "Hide";
+      }
     } else if (action === "apply-wifi") {
       if (!state.editMode) return;
       const radioKey = actionEl.getAttribute("data-radio");
       const radio = state.wifi[radioKey];
+      const nextSsid = String(radio.ssid || "").trim();
+      const nextPass = String(radio.passphrase || "");
+      if (nextSsid.length < 1 || nextSsid.length > 32) {
+        pushToast("SSID must be between 1 and 32 characters.", "danger");
+        return;
+      }
+      if (nextPass.length > 0 && (nextPass.length < 8 || nextPass.length > 63)) {
+        pushToast("WPA passphrase must be 8–63 characters (or leave blank to keep current).", "danger");
+        return;
+      }
+      const passNote = nextPass.length > 0 ? " + new WPA passphrase" : " (keeping current password)";
       state.confirmModal = {
         title: `Update ${radio.bandLabel} (${radio.iface}) & Restart Wi-Fi?`,
-        impact: `Writing ${radio.datFile} (Channel ${radio.channel}, HT_BW=${radio.htBw}) and running 'wifi restart'. Both 2.4 GHz and 5 GHz Wi-Fi will drop for ~20 seconds while the MediaTek driver reloads.`,
+        impact: `Writing ${radio.datFile}: SSID "${nextSsid}"${passNote}, Channel ${radio.channel}, HT_BW=${radio.htBw}, then running 'wifi restart'. Both 2.4 GHz and 5 GHz Wi-Fi will drop for ~20 seconds while the MediaTek driver reloads.`,
         lifelineNote: `Automatic backup ${radio.iface}.dat.<timestamp>.pwa-bak is created first. Dropbear SSH and VPN stay up.`,
         onConfirm: async () => {
           if (state.dataSource === "live") {
-            await ubusBatchCall([{
+            const payload = {
+              radio: radioKey,
+              ssid: nextSsid,
+              channel: Number(radio.channel),
+              ht_bw: Number(radio.htBw)
+            };
+            if (nextPass.length > 0) {
+              payload.password = nextPass;
+            }
+            const res = await ubusBatchCall([{
               object: "aw1000",
               method: "wifi_set",
-              args: {
-                radio: radioKey,
-                ssid: radio.ssid,
-                channel: Number(radio.channel),
-                ht_bw: Number(radio.htBw)
-              }
+              args: payload
             }]);
+            const r = res?.[0];
+            if (!r || r.code !== 0 || r.data?.ok === false) {
+              const errMsg = r?.data?.error || r?.statusText || "Failed to update Wi-Fi config";
+              pushToast(`Wi-Fi update failed: ${errMsg}`, "danger");
+              if (r?.code === 6) {
+                state.editMode = false;
+                state.loginError = errMsg;
+                state.loginModalOpen = true;
+                render();
+              }
+              return;
+            }
           }
+          radio.ssid = nextSsid;
+          radio.passphrase = "";
           radio.widthLabel = Number(radio.htBw) === 0 ? "20 MHz" : (radioKey === "ra0" ? "20/40 MHz" : "80 MHz");
-          pushToast(`Backed up ${radio.datFile} and restarted Wi-Fi (${radio.iface} on Ch ${radio.channel}).`);
+          pushToast(`Saved ${radio.datFile} (SSID: ${nextSsid}${nextPass ? " + new password" : ""}) & restarting Wi-Fi…`);
         }
       };
       render();
@@ -2343,6 +2419,19 @@ function setupEvents() {
       state.cellular[cellField] = e.target.value;
     }
   });
+
+  document.addEventListener("change", (e) => {
+    const wifiKey = e.target.getAttribute("data-wifi");
+    if (wifiKey) {
+      const field = e.target.getAttribute("data-field");
+      state.wifi[wifiKey][field] = e.target.value;
+      return;
+    }
+    const cellField = e.target.getAttribute("data-cell");
+    if (cellField) {
+      state.cellular[cellField] = e.target.value;
+    }
+  });
 }
 
 // ============================================================================
@@ -2422,8 +2511,9 @@ function applyLiveTelemetry(tm, cl, st, mg, wg, bl, lg) {
         state.cellular.mode = tm.cell.rat;
         state.cellular.regState = `Registered (${tm.cell.rat})`;
       }
+      state.cellular.nrRsrp = typeof nr.rsrp === "number" ? nr.rsrp : null;
+      state.cellular.lteRsrp = typeof lte.rsrp === "number" ? lte.rsrp : null;
       if (typeof nr.rsrp === "number") {
-        state.cellular.nrRsrp = nr.rsrp;
         state.cellular.rsrp = nr.rsrp;
       } else if (typeof lte.rsrp === "number") {
         state.cellular.rsrp = lte.rsrp;
@@ -2433,8 +2523,9 @@ function applyLiveTelemetry(tm, cl, st, mg, wg, bl, lg) {
       } else if (typeof lte.rsrq === "number") {
         state.cellular.rsrq = lte.rsrq;
       }
+      state.cellular.nrSinr = typeof nr.sinr === "number" ? nr.sinr : null;
+      state.cellular.lteSinr = typeof lte.sinr === "number" ? lte.sinr : null;
       if (typeof nr.sinr === "number") {
-        state.cellular.nrSinr = nr.sinr;
         state.cellular.sinr = nr.sinr;
       } else if (typeof lte.sinr === "number") {
         state.cellular.sinr = lte.sinr;
@@ -2649,7 +2740,7 @@ async function pollTick(forceExtended = false) {
             ext?.[3]?.data,
             ext?.[4]?.data
           );
-          if (!isAnyModalOpen()) render();
+          if (!isAnyModalOpen() && !isFormFieldFocused()) render();
         })
         .catch(() => {
           extendedLoadedOnce = false;
@@ -2662,7 +2753,9 @@ async function pollTick(forceExtended = false) {
       state.staleSince = new Date().toTimeString().slice(0, 5);
     }
   }
-  render();
+  if (!isAnyModalOpen() && !isFormFieldFocused()) {
+    render();
+  }
 }
 
 function restartPolling() {

@@ -1,7 +1,7 @@
 # AW1000 Control — Lightweight Native Android APK (`aw1000-apk`)
 
 A minimal, zero-bloat native Android Kotlin `WebView` wrapper (`< 1 MB` APK size) for
-the **AW1000 Control PWA** (`/home/ma/AW1000/aw1000-pwa/`).
+the **AW1000 Control PWA** (`../aw1000-pwa/`).
 
 ## Features
 - **Instant Local Asset Bootstrap + In-App Multi-Profile Router Connection:**
@@ -25,15 +25,15 @@ the **AW1000 Control PWA** (`/home/ma/AW1000/aw1000-pwa/`).
 ## Build Commands
 
 ```bash
-cd /home/ma/AW1000/aw1000-apk
+cd aw1000-apk
 ./gradlew assembleRelease
 ```
 
 ## Output APK Locations
-- `/home/ma/AW1000/aw1000-apk/aw1000-control-release.apk`
-- `/home/ma/AW1000/aw1000-apk/app/build/outputs/apk/release/app-release.apk`
+- `aw1000-apk/aw1000-control-release.apk`
+- `aw1000-apk/app/build/outputs/apk/release/app-release.apk`
 
 ## Install via ADB
 ```bash
-adb install -r /home/ma/AW1000/aw1000-apk/aw1000-control-release.apk
+adb install -r aw1000-apk/aw1000-control-release.apk
 ```

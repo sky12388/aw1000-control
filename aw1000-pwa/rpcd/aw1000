@@ -79,6 +79,7 @@ case "$1" in
 		json_add_object "wifi_set"
 			json_add_string "radio" "ra0|rai0"
 			json_add_string "ssid" "string"
+			json_add_string "password" "string"
 			json_add_int "channel" 1
 			json_add_int "ht_bw" 0
 		json_close_object
@@ -188,7 +189,7 @@ case "$1" in
 				mounted=false
 				grep -q " $M " /proc/mounts 2>/dev/null && mounted=true
 				set -- $(df -k "$M" 2>/dev/null | awk 'NR==2{print $2, $3, $4}')
-				printf '{"ok":true,"mount":\"%s\","mounted":%s,"total_kb":%s,"used_kb":%s,"avail_kb":%s,"items":[' \
+				printf '{"ok":true,"mount":"%s","mounted":%s,"total_kb":%s,"used_kb":%s,"avail_kb":%s,"items":[' \
 					"$M" "$mounted" "${1:-null}" "${2:-null}" "${3:-null}"
 				f=1
 				if [ "$mounted" = true ]; then
@@ -223,6 +224,7 @@ case "$1" in
 				json_load "$input"
 				json_get_var radio radio
 				json_get_var ssid ssid
+				json_get_var password password
 				json_get_var channel channel
 				json_get_var ht_bw ht_bw
 
@@ -244,9 +246,21 @@ case "$1" in
 					echo '{"ok":false,"error":"Invalid HT_BW (must be 0 or 1)"}'; exit 0 ;;
 				esac
 
-				clean_ssid=$(printf '%s' "$ssid" | tr -cd 'A-Za-z0-9_ .-')
-				if [ -z "$clean_ssid" ]; then
-					echo '{"ok":false,"error":"Invalid SSID"}'; exit 0
+				clean_ssid=$(printf '%s' "$ssid" | tr -d '\r\n')
+				ssid_len=${#clean_ssid}
+				if [ "$ssid_len" -lt 1 ] || [ "$ssid_len" -gt 32 ]; then
+					echo '{"ok":false,"error":"SSID must be 1-32 characters"}'; exit 0
+				fi
+
+				clean_pass=""
+				pass_updated=0
+				if [ -n "$password" ]; then
+					clean_pass=$(printf '%s' "$password" | tr -d '\r\n')
+					pass_len=${#clean_pass}
+					if [ "$pass_len" -lt 8 ] || [ "$pass_len" -gt 63 ]; then
+						echo '{"ok":false,"error":"WPA passphrase must be 8-63 characters"}'; exit 0
+					fi
+					pass_updated=1
 				fi
 
 				ts=$(date +%Y%m%d-%H%M%S)
@@ -255,11 +269,26 @@ case "$1" in
 					echo '{"ok":false,"error":"Backup failed; aborting write"}'; exit 0
 				}
 
-				sed -i \
-					-e "s/^SSID1=.*/SSID1=${clean_ssid}/" \
-					-e "s/^Channel=.*/Channel=${channel}/" \
-					-e "s/^HT_BW=.*/HT_BW=${ht_bw}/" \
-					"$target"
+				tmp_dat="${target}.pwa-tmp"
+				AW_SSID="$clean_ssid" AW_PASS="$clean_pass" awk -v c="$channel" -v b="$ht_bw" -v up="$pass_updated" '
+				BEGIN { s=ENVIRON["AW_SSID"]; p=ENVIRON["AW_PASS"]; seen_s=0; seen_c=0; seen_b=0; seen_p=0 }
+				/^SSID1=/ { print "SSID1=" s; seen_s=1; next }
+				/^Channel=/ { print "Channel=" c; seen_c=1; next }
+				/^HT_BW=/ { print "HT_BW=" b; seen_b=1; next }
+				/^WPAPSK1=/ {
+					if (up == 1) { print "WPAPSK1=" p } else { print $0 }
+					seen_p=1; next
+				}
+				{ print $0 }
+				END {
+					if (!seen_s) print "SSID1=" s
+					if (!seen_c) print "Channel=" c
+					if (!seen_b) print "HT_BW=" b
+					if (up == 1 && !seen_p) print "WPAPSK1=" p
+				}' "$target" > "$tmp_dat" && mv "$tmp_dat" "$target" && chmod 644 "$target" || {
+					rm -f "$tmp_dat"
+					echo '{"ok":false,"error":"Failed to write MediaTek .dat file"}'; exit 0
+				}
 
 				( sleep 1 && wifi restart >/dev/null 2>&1 ) &
 
@@ -267,6 +296,8 @@ case "$1" in
 				json_add_boolean "ok" 1
 				json_add_string "backup" "$bak"
 				json_add_string "radio" "$radio"
+				json_add_string "ssid" "$clean_ssid"
+				json_add_boolean "password_updated" "$pass_updated"
 				json_dump
 				;;
 

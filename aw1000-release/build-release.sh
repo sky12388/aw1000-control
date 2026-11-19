@@ -10,7 +10,7 @@
 set -euo pipefail
 
 VERSION="1.0.4"
-ROOT="/home/ma/AW1000"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PWA_DIR="$ROOT/aw1000-pwa"
 APK_DIR="$ROOT/aw1000-apk"
 REL_DIR="$ROOT/aw1000-release"
@@ -25,13 +25,17 @@ mkdir -p "$WORK/data/www/app" \
          "$WORK/control" \
          "$WORK/ipk"
 
-echo "[1/5] Building PWA (v11) and verifying JS syntax..."
+echo "[1/5] Building PWA (v14) and verifying JS syntax..."
 npm --prefix "$PWA_DIR" run build
 node --check "$PWA_DIR/dist/app.js"
 
-echo "[2/5] Building public Android APK (v$VERSION)..."
-"$APK_DIR/gradlew" assembleRelease
-cp -f "$APK_DIR/aw1000-control-release.apk" "$REL_DIR/AW1000-Control-v${VERSION}.apk"
+echo "[2/5] Checking public Android APK (v$VERSION)..."
+if [ -x "$APK_DIR/gradlew" ] && [ "${SKIP_APK_BUILD:-0}" != "1" ]; then
+  "$APK_DIR/gradlew" -p "$APK_DIR" assembleRelease
+  cp -f "$APK_DIR/aw1000-control-release.apk" "$REL_DIR/AW1000-Control-v${VERSION}.apk"
+elif [ -f "$APK_DIR/aw1000-control-release.apk" ]; then
+  cp -f "$APK_DIR/aw1000-control-release.apk" "$REL_DIR/AW1000-Control-v${VERSION}.apk"
+fi
 
 echo "[3/5] Staging router payload (zero personal secrets or IPs)..."
 cp "$PWA_DIR/dist/index.html" \
@@ -53,9 +57,11 @@ chmod 755 "$WORK/data/www/cgi-bin/ubus" \
           "$WORK/data/usr/bin/aw1000-telemetry" \
           "$WORK/data/usr/bin/aw1000-ctl"
 chmod 644 "$WORK/data/usr/share/rpcd/acl.d/aw1000-pwa.json"
+find "$WORK/data" -type d -exec chmod 755 {} +
+find "$WORK/data/www/app" -type f -exec chmod 644 {} +
 
 # 1. Router tarball for install.sh
-tar -C "$WORK/data" --owner=0 --group=0 -czf "$REL_DIR/aw1000-control-router-v${VERSION}.tar.gz" .
+tar -C "$WORK/data" --owner=0 --group=0 -czf "$REL_DIR/aw1000-control-router-v${VERSION}.tar.gz" www usr
 
 echo "[4/5] Building OpenWrt .ipk package (aw1000-control_${VERSION}_all.ipk)..."
 INSTALLED_SIZE=$(du -sk "$WORK/data" | awk '{print $1}')
@@ -84,6 +90,11 @@ uci add_list rpcd.pwa.read="aw1000-pwa-readonly"
 uci -q delete rpcd.pwa.write || true
 uci add_list rpcd.pwa.write="aw1000-pwa-write"
 uci commit rpcd
+if [ "$(uci -q get uhttpd.main.rfc1918_filter)" != "0" ]; then
+  uci set uhttpd.main.rfc1918_filter="0"
+  uci commit uhttpd
+  /etc/init.d/uhttpd reload >/dev/null 2>&1 || true
+fi
 /etc/init.d/rpcd restart >/dev/null 2>&1 || true
 exit 0
 EOF

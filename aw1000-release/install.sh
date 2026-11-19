@@ -49,6 +49,11 @@ uci add_list rpcd.pwa.read="aw1000-pwa-readonly"
 uci -q delete rpcd.pwa.write || true
 uci add_list rpcd.pwa.write="aw1000-pwa-write"
 uci commit rpcd
+if [ "$(uci -q get uhttpd.main.rfc1918_filter)" != "0" ]; then
+    uci set uhttpd.main.rfc1918_filter="0"
+    uci commit uhttpd
+    /etc/init.d/uhttpd reload >/dev/null 2>&1 || true
+fi
 
 echo "[4/4] Restarting rpcd and verifying ubus..."
 /etc/init.d/rpcd restart
