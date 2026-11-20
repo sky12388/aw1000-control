@@ -57,6 +57,8 @@
           "band_lock",
           "cell_lock",
           "apn_set",
+          "sms_send",
+          "sms_delete",
           "modem_reregister",
           "modem_restart",
           "backup_create"

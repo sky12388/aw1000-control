@@ -1538,6 +1538,10 @@ function renderSmsUssdScreen() {
   }
 
   const disabled = !state.editMode ? "disabled" : "";
+  const st = state.smsStorage || {};
+  const storageSummary = (st.me || st.sm)
+    ? `ME: ${st.me?.used ?? 0}/${st.me?.total ?? 50} · SIM: ${st.sm?.used ?? 0}/${st.sm?.total ?? 40}`
+    : "ME + SIM PDU storage";
 
   return `
     <div class="grid-2">
@@ -1548,25 +1552,46 @@ function renderSmsUssdScreen() {
             <div class="card-icon signal">${ICONS.sms}</div>
             <div class="card-title-text min-w-0">
               <h1 class="card-title">SIM SMS Messages (${state.smsList.length})</h1>
-              <p class="card-subtitle">Decoded from FG360 ME + SIM PDU storage (<code class="mono">aw1000.sms_list</code>)</p>
+              <p class="card-subtitle">${escapeHtml(storageSummary)} (<code class="mono">aw1000.sms_list</code>)</p>
             </div>
           </div>
           <button class="icon-btn shrink-0" data-action="refresh-sms">${ICONS.refresh} Refresh</button>
         </div>
 
+        ${state.smsError ? `
+          <div class="impact-box" role="alert" style="padding:10px 12px; font-size:0.80rem;">
+            <strong>SMS AT Diagnostic:</strong> <span class="mono">${escapeHtml(state.smsError)}</span>
+          </div>
+        ` : ""}
+
         ${state.smsList.length === 0 ? `
           <div class="rf-stat" style="padding:18px; text-align:center;">
-            No SMS messages stored on SIM.
+            No SMS messages stored in Modem (ME) or SIM (SM) memory.
           </div>
         ` : `
           <div class="device-list">
             ${state.smsList.map((m) => `
               <div class="device-row ${m.unread ? "is-new" : ""}" style="grid-template-columns: 1fr;">
                 <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
-                  <strong>${escapeHtml(m.sender)} ${m.unread ? `<span class="new-tag">New</span>` : ""}</strong>
-                  <time class="card-subtitle tabular">${escapeHtml(m.time)}</time>
+                  <strong>
+                    ${escapeHtml(m.sender)}
+                    ${m.storage ? `<span class="mono" style="font-size:0.68rem; padding:1px 5px; border-radius:6px; background:var(--bg-subtle); border:1px solid var(--border-subtle); margin-left:4px;">${escapeHtml(m.storage)}</span>` : ""}
+                    ${m.unread ? `<span class="new-tag">New</span>` : ""}
+                  </strong>
+                  <div style="display:flex; align-items:center; gap:8px;">
+                    <time class="card-subtitle tabular">${escapeHtml(m.time)}</time>
+                    ${m.indexes ? `
+                      <button class="icon-btn" style="min-height:26px; padding:2px 8px; font-size:0.72rem;"
+                        data-action="delete-sms"
+                        data-storage="${escapeHtml(m.storage || "ME")}"
+                        data-indexes="${escapeHtml(m.indexes)}"
+                        data-sender="${escapeHtml(m.sender)}">
+                        Delete
+                      </button>
+                    ` : ""}
+                  </div>
                 </div>
-                <p style="font-size:0.89rem; color:var(--text-secondary); margin-top:4px; word-break:break-word;">${escapeHtml(m.text)}</p>
+                <p style="font-size:0.89rem; color:var(--text-secondary); margin-top:4px; word-break:break-word; white-space:pre-wrap;">${escapeHtml(m.text)}</p>
               </div>
             `).join("")}
           </div>
@@ -1582,9 +1607,12 @@ function renderSmsUssdScreen() {
             <input class="input" type="text" placeholder="Type SMS..." value="${escapeHtml(state.smsComposeBody)}" data-input="smsComposeBody" ${disabled}/>
           </div>
         </div>
-        <button class="btn btn-primary-net" data-action="send-sms" ${disabled} style="align-self:flex-start;">
-          Send SMS via FG360
-        </button>
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          <button class="btn btn-primary-net" data-action="send-sms" style="align-self:flex-start;">
+            ${state.editMode ? "Send SMS via FG360" : `${ICONS.lock} Unlock to Send SMS`}
+          </button>
+          ${!state.editMode ? `<span class="card-subtitle" style="font-size:0.76rem;">Reading SMS works in Read-Only Mode; unlock Edit Mode to send or delete.</span>` : ""}
+        </div>
       </article>
 
       <article class="card">
@@ -2895,21 +2923,94 @@ function setupEvents() {
       state.ussdResult = `[${new Date().toLocaleTimeString()}] USSD ${state.ussdInput}: Request sent to FG360 modem.`;
       render();
     } else if (action === "send-sms") {
-      if (!state.editMode) return;
-      if (!state.smsComposeTo || !state.smsComposeBody) {
+      if (!state.editMode) {
+        pushToast("Unlock Edit Mode to send SMS.");
+        state.loginModalOpen = true;
+        render();
+        return;
+      }
+      const num = String(state.smsComposeTo || "").trim();
+      const body = String(state.smsComposeBody || "").trim();
+      if (!num || !body) {
         pushToast("Enter recipient number and message first.");
         return;
       }
-      state.smsList.unshift({
-        id: "s_" + Date.now(),
-        sender: `To: ${state.smsComposeTo}`,
-        time: "Just now",
-        unread: false,
-        text: state.smsComposeBody
-      });
-      state.smsComposeTo = "";
-      state.smsComposeBody = "";
-      pushToast("SMS queued via FG360 PDU encoder.");
+      state.smsError = null;
+      if (state.dataSource === "live") {
+        try {
+          const [res] = await ubusBatchCall([{
+            object: "aw1000",
+            method: "sms_send",
+            args: { number: num, text: body, storage: "ME" }
+          }]);
+          if (!res || res.code !== 0 || res.data?.ok === false) {
+            const msg = res?.data?.error || res?.statusText || "Modem rejected SMS send";
+            state.smsError = `Send failed: ${msg}`;
+            pushToast(state.smsError);
+            render();
+            return;
+          }
+          state.smsComposeTo = "";
+          state.smsComposeBody = "";
+          pushToast(`SMS sent to ${num} (${res.data?.parts || 1} part).`);
+          await refreshTabSpecificLive("sms");
+        } catch (err) {
+          state.smsError = `Send failed: ${err?.message || "Network error"}`;
+          pushToast(state.smsError);
+          render();
+        }
+      } else {
+        state.smsList.unshift({
+          id: "s_" + Date.now(),
+          sender: `To: ${num}`,
+          time: "Just now",
+          unread: false,
+          storage: "ME",
+          text: body
+        });
+        state.smsComposeTo = "";
+        state.smsComposeBody = "";
+        pushToast("SMS queued (Mock Mode).");
+        render();
+      }
+    } else if (action === "delete-sms") {
+      if (!state.editMode) {
+        pushToast("Unlock Edit Mode to delete SMS.");
+        state.loginModalOpen = true;
+        render();
+        return;
+      }
+      const storage = actionEl.getAttribute("data-storage") || "ME";
+      const indexes = actionEl.getAttribute("data-indexes") || "";
+      const sender = actionEl.getAttribute("data-sender") || "message";
+      if (!indexes) return;
+      state.confirmModal = {
+        title: `Delete SMS from ${sender}?`,
+        impact: `Deletes PDU index(es) ${indexes} from ${storage} storage via AT+CMGD. This cannot be undone.`,
+        lifelineNote: "Cellular WAN, Wi-Fi, SSH, and VPN remain completely unaffected.",
+        onConfirm: async () => {
+          state.smsError = null;
+          if (state.dataSource === "live") {
+            const [res] = await ubusBatchCall([{
+              object: "aw1000",
+              method: "sms_delete",
+              args: { storage, indexes }
+            }]);
+            if (!res || res.code !== 0 || res.data?.ok === false) {
+              state.smsError = `Delete failed: ${res?.data?.error || res?.statusText || "AT+CMGD error"}`;
+              pushToast(state.smsError);
+              render();
+              return;
+            }
+            pushToast(`Deleted SMS (${storage} #${indexes}).`);
+            await refreshTabSpecificLive("sms");
+          } else {
+            state.smsList = state.smsList.filter((m) => m.indexes !== indexes);
+            pushToast("Deleted SMS (Mock Mode).");
+          }
+        }
+      };
+      render();
     }
   });
 
@@ -3229,17 +3330,25 @@ async function refreshTabSpecificLive(tab) {
   try {
     if (tab === "sms") {
       const [res] = await ubusBatchCall([{ object: "aw1000", method: "sms_list" }]);
-      if (res?.data && Array.isArray(res.data.inbox)) {
+      if (!res || res.code !== 0 || !res.data) {
+        state.smsError = `aw1000.sms_list failed: ${res?.statusText || "No response from rpcd"}`;
+        render();
+        return;
+      }
+      state.smsStorage = res.data.storage || null;
+      state.smsError = res.data.error || (res.data.ok === false ? "Modem AT SMS read error" : null);
+      if (Array.isArray(res.data.inbox)) {
         state.smsList = res.data.inbox.map((m, i) => ({
-          id: "live_sms_" + (m.storage || "MT") + "_" + (m.index ?? i),
+          id: "live_sms_" + (m.storage || "ME") + "_" + (m.index ?? i),
           sender: m.sender || "SIM",
           time: m.time || "",
           unread: Boolean(m.unread),
-          storage: m.storage || "",
+          storage: m.storage || "ME",
+          indexes: Array.isArray(m.indexes) ? m.indexes.join(",") : String(m.index ?? ""),
           text: m.content || ""
         }));
-        render();
       }
+      render();
     } else if (tab === "system") {
       const res = await ubusBatchCall([
         { object: "aw1000", method: "backup_list" },
@@ -3248,8 +3357,11 @@ async function refreshTabSpecificLive(tab) {
       applyLiveTelemetry(null, null, null, null, null, res?.[0]?.data, res?.[1]?.data);
       render();
     }
-  } catch (_) {
-    // ignore transient error
+  } catch (err) {
+    if (tab === "sms") {
+      state.smsError = `SMS refresh error: ${err?.message || "Router unreachable"}`;
+      render();
+    }
   }
 }
 

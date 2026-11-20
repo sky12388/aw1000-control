@@ -107,6 +107,15 @@ case "$1" in
 			json_add_string "apn" "string"
 			json_add_string "iptype" "IPv4|IPv6|IPv4v6|1|2|3"
 		json_close_object
+		json_add_object "sms_send"
+			json_add_string "number" "+60123456789"
+			json_add_string "text" "message"
+			json_add_string "storage" "ME|SM"
+		json_close_object
+		json_add_object "sms_delete"
+			json_add_string "storage" "ME|SM"
+			json_add_string "indexes" "1,2"
+		json_close_object
 		json_add_object "modem_reregister"
 		json_close_object
 		json_add_object "modem_restart"
@@ -208,10 +217,17 @@ end
 local stores = { "ME", "SM" }
 local stats = {}
 local raw_msgs = {}
+local at_errors = {}
 local total_used, total_cap = 0, 0
 
 for _, st in ipairs(stores) do
 	local cmgl_raw = run_read(string.format("/usr/share/3ginfo-lite/sms-mtk-at.sh %s 'AT+CMGL=4'", st))
+	local err_line = cmgl_raw:match("(%+CM[ES] ERROR[^\r\n]*)")
+		or cmgl_raw:match("(Failed to [^\r\n]*)")
+		or (cmgl_raw == "" and ("No AT response from " .. st) or nil)
+	if err_line then
+		table.insert(at_errors, st .. ": " .. err_line)
+	end
 	local cpms_raw = run_read(string.format("/usr/share/3ginfo-lite/sms-mtk-at.sh %s 'AT+CPMS?'", st))
 	local _, used, cap = cpms_raw:match('%+CPMS:%s*"?(%u%u)"?%s*,%s*(%d+)%s*,%s*(%d+)')
 	used = tonumber(used) or 0
@@ -245,9 +261,18 @@ for _, item in ipairs(raw_msgs) do
 	-- Include unread (0) and read (1) received SMS; skip unsent/sent drafts (2/3)
 	if item.stat == nil or item.stat == 0 or item.stat == 1 then
 		local d_out = run_read(string.format("/usr/bin/lua /usr/share/3ginfo-lite/sms-forward.lua --decode '%s' %d", item.pdu, item.index))
-		local sender = d_out:match("SENDER=([^\n]*)") or "-"
-		local ts = d_out:match("TIME=([^\n]*)") or "-"
-		local content = (d_out:match("CONTENT=([^\n]*)") or ""):gsub("\\n", "\n")
+		local sender = d_out:match("SENDER=([^\n]*)")
+		local ts = d_out:match("TIME=([^\n]*)")
+		local content = d_out:match("CONTENT=([^\n]*)")
+		if not sender and not content then
+			sender = "Unknown"
+			ts = "-"
+			content = "[Malformed PDU #" .. tostring(item.index) .. "]"
+		else
+			sender = sender or "-"
+			ts = ts or "-"
+			content = (content or ""):gsub("\\n", "\n")
+		end
 		local part, total, ref = d_out:match("CONCAT=(%d+)/(%d+)%s+REF=(%d+)")
 		local msg = {
 			index = item.index,
@@ -319,8 +344,8 @@ for line in ob_raw:gmatch("[^\n]+") do
 	end
 end
 
-print(json.stringify({
-	ok = true,
+local resp = {
+	ok = (#at_errors < #stores),
 	storage = {
 		selected = "ME",
 		active = "ME+SM",
@@ -331,7 +356,11 @@ print(json.stringify({
 	},
 	inbox = decoded,
 	outbox = outbox
-}))
+}
+if #at_errors > 0 then
+	resp.error = table.concat(at_errors, "; ")
+end
+print(json.stringify(resp))
 LUA
 				elif [ -x "$CTL" ]; then
 					"$CTL" sms-list MT
@@ -667,6 +696,54 @@ LUA
 					uci -q commit network
 					/sbin/ifup wan >/dev/null 2>&1 &
 					printf '{"ok":true,"apn":"%s","iptype":%s}\n' "$clean_apn" "$ipnum"
+				fi
+				;;
+
+			sms_send)
+				read -r input
+				json_load "$input" 2>/dev/null
+				json_get_var number number
+				json_get_var text text
+				json_get_var storage storage
+				clean_num=$(printf '%s' "$number" | tr -cd '0-9+*#')
+				if [ "${#clean_num}" -lt 3 ] || [ "${#clean_num}" -gt 24 ]; then
+					echo '{"ok":false,"error":"Invalid recipient phone number"}'
+					exit 0
+				fi
+				if [ -z "$text" ]; then
+					echo '{"ok":false,"error":"SMS message text cannot be empty"}'
+					exit 0
+				fi
+				store=$(printf '%s' "${storage:-ME}" | tr 'a-z' 'A-Z')
+				case "$store" in ME|SM) ;; *) store="ME" ;; esac
+				if [ -x "$CTL" ]; then
+					text_b64=$(printf '%s' "$text" | base64 | tr -d '\r\n')
+					out=$("$CTL" sms-send "$clean_num" "$text_b64" "$store" 2>&1)
+					/usr/share/3ginfo-lite/sms-mtk-at.sh ME 'AT+CPMS="ME","ME","ME"' >/dev/null 2>&1 || true
+					printf '%s\n' "$out"
+				else
+					echo '{"ok":false,"error":"aw1000-ctl not found"}'
+				fi
+				;;
+
+			sms_delete)
+				read -r input
+				json_load "$input" 2>/dev/null
+				json_get_var storage storage
+				json_get_var indexes indexes
+				store=$(printf '%s' "${storage:-ME}" | tr 'a-z' 'A-Z')
+				case "$store" in ME|SM|MT) ;; *) store="ME" ;; esac
+				clean_idxs=$(printf '%s' "$indexes" | tr -cd '0-9,')
+				if [ -z "$clean_idxs" ]; then
+					echo '{"ok":false,"error":"Missing SMS index(es) to delete"}'
+					exit 0
+				fi
+				if [ -x "$CTL" ]; then
+					out=$("$CTL" sms-delete "$store" "$clean_idxs" 2>&1)
+					/usr/share/3ginfo-lite/sms-mtk-at.sh ME 'AT+CPMS="ME","ME","ME"' >/dev/null 2>&1 || true
+					printf '%s\n' "$out"
+				else
+					echo '{"ok":false,"error":"aw1000-ctl not found"}'
 				fi
 				;;
 
