@@ -124,9 +124,105 @@
     if (step2El) step2El.textContent = info.step2;
   }
 
+  const GH_REPO = "sky12388/aw1000-control";
+  const ABACUS_NS = "sky12388-aw1000-control";
+  const ABACUS_KEY = "visits";
+
+  function fmtNum(n) {
+    return typeof n === "number" && Number.isFinite(n) ? n.toLocaleString() : "—";
+  }
+
+  async function initSiteCounters() {
+    const viewsEl = document.getElementById("statViews");
+    const dlEl = document.getElementById("statDownloads");
+    const dlBreakEl = document.getElementById("statDownloadsBreak");
+    const starsEl = document.getElementById("statStars");
+
+    // 1. Live Page View Counter (Abacus; 1 hit per browser session)
+    if (viewsEl) {
+      try {
+        const hitKey = "aw1000_web_counted";
+        const alreadyCounted = sessionStorage.getItem(hitKey) === "1";
+        const endpoint = alreadyCounted
+          ? `https://abacus.jasoncameron.dev/get/${ABACUS_NS}/${ABACUS_KEY}`
+          : `https://abacus.jasoncameron.dev/hit/${ABACUS_NS}/${ABACUS_KEY}`;
+        let res = await fetch(endpoint, { cache: "no-store" });
+        if (!res.ok && alreadyCounted) {
+          res = await fetch(`https://abacus.jasoncameron.dev/hit/${ABACUS_NS}/${ABACUS_KEY}`, { cache: "no-store" });
+        }
+        if (res.ok) {
+          const data = await res.json();
+          if (typeof data?.value === "number") {
+            viewsEl.textContent = fmtNum(data.value);
+            sessionStorage.setItem(hitKey, "1");
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 2. Live GitHub Release Downloads & Stars (cached 5 min per session)
+    if (dlEl || starsEl) {
+      try {
+        const cacheKey = "aw1000_gh_stats_v1";
+        const cachedRaw = sessionStorage.getItem(cacheKey);
+        let stats = null;
+        if (cachedRaw) {
+          const parsed = JSON.parse(cachedRaw);
+          if (parsed && Date.now() - parsed.ts < 5 * 60 * 1000) {
+            stats = parsed;
+          }
+        }
+        if (!stats) {
+          const [repoRes, relRes] = await Promise.all([
+            fetch(`https://api.github.com/repos/${GH_REPO}`),
+            fetch(`https://api.github.com/repos/${GH_REPO}/releases?per_page=30`)
+          ]);
+          let stars = null;
+          let totalDl = 0;
+          let apkDl = 0;
+          let routerDl = 0;
+          let hasRel = false;
+
+          if (repoRes.ok) {
+            const repo = await repoRes.json();
+            if (typeof repo?.stargazers_count === "number") stars = repo.stargazers_count;
+          }
+          if (relRes.ok) {
+            const releases = await relRes.json();
+            if (Array.isArray(releases)) {
+              hasRel = true;
+              for (const rel of releases) {
+                for (const asset of rel.assets || []) {
+                  const c = Number(asset.download_count) || 0;
+                  totalDl += c;
+                  const name = (asset.name || "").toLowerCase();
+                  if (name.endsWith(".apk")) apkDl += c;
+                  else if (name.endsWith(".ipk") || name.endsWith(".tar.gz")) routerDl += c;
+                }
+              }
+            }
+          }
+          stats = { ts: Date.now(), stars, totalDl: hasRel ? totalDl : null, apkDl, routerDl };
+          sessionStorage.setItem(cacheKey, JSON.stringify(stats));
+        }
+
+        if (starsEl && stats.stars !== null) {
+          starsEl.textContent = fmtNum(stats.stars);
+        }
+        if (dlEl && stats.totalDl !== null) {
+          dlEl.textContent = fmtNum(stats.totalDl);
+          if (dlBreakEl && (stats.apkDl > 0 || stats.routerDl > 0)) {
+            dlBreakEl.textContent = `(${fmtNum(stats.apkDl)} APK · ${fmtNum(stats.routerDl)} Router)`;
+          }
+        }
+      } catch (_) {}
+    }
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
     renderPreview(10);
     selectOsTab("windows");
+    initSiteCounters();
 
     const slider = document.getElementById("signalSlider");
     if (slider) {

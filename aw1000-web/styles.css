@@ -572,3 +572,70 @@ body {
 .footer a {
   color: var(--text-secondary);
 }
+
+/* Live Site & Release Counter Strip */
+.monitor-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.monitor-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  font-size: 0.80rem;
+  color: var(--text-secondary);
+}
+
+.monitor-label {
+  font-weight: 650;
+  color: var(--text-muted);
+}
+
+.monitor-val {
+  color: var(--text-primary);
+  font-weight: 850;
+  font-size: 0.86rem;
+}
+
+.monitor-sub {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #00E676;
+  box-shadow: 0 0 8px rgba(0, 230, 118, 0.75);
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.monitor-badge-link {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  transition: border-color 150ms ease, transform 150ms ease;
+}
+
+.monitor-badge-link:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+}
+
+.monitor-badge-link img {
+  display: block;
+  height: 22px;
+}
