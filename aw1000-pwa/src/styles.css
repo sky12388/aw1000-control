@@ -426,6 +426,22 @@ html, body {
   border-color: rgba(47, 123, 255, 0.28);
 }
 
+.conn-pill[data-offline="true"] {
+  background: rgba(239, 68, 68, 0.16);
+  color: #EF4444;
+  border-color: rgba(239, 68, 68, 0.48);
+}
+
+.conn-pill[data-offline="true"] .pulse-dot {
+  background: #EF4444;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.30);
+}
+
+.unreachable-banner.is-offline-alert {
+  background: rgba(239, 68, 68, 0.14);
+  border: 1px solid rgba(239, 68, 68, 0.52);
+}
+
 .pulse-dot {
   width: 8px;
   height: 8px;

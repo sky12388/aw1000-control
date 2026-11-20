@@ -413,8 +413,44 @@ function playConfirmationChirp(ctx) {
   }
 }
 
+function stopBeeperForOffline() {
+  if (beeperTimeout) {
+    clearTimeout(beeperTimeout);
+    beeperTimeout = null;
+  }
+  state.beeperActive = false;
+}
+
+function clearStaleTelemetryOnDisconnect() {
+  stopBeeperForOffline();
+  state.routerOffline = true;
+  state.unreachableBanner = true;
+  state.cellular.rsrp = null;
+  state.cellular.nrRsrp = null;
+  state.cellular.lteRsrp = null;
+  state.cellular.sinr = null;
+  state.cellular.nrSinr = null;
+  state.cellular.lteSinr = null;
+  state.cellular.rsrq = null;
+  state.cellular.rssi = null;
+  state.cellular.pci = "--";
+  state.cellular.cellId = "--";
+  state.cellular.mode = "--";
+  state.cellular.regState = "Offline / No Connection";
+  state.cellular.primaryBand = "--";
+  state.cellular.anchorBand = "--";
+  state.cellular.caStatus = "--";
+  state.cellular.ta = null;
+  state.router.pingMs = null;
+  state.throughput.downMbps = 0;
+  state.throughput.upMbps = 0;
+}
+
 function playAlignmentBeep() {
-  if (!state.beeperActive) return;
+  if (!state.beeperActive || state.routerOffline) {
+    stopBeeperForOffline();
+    return;
+  }
   try {
     const ctx = audioCtx || unlockAudioContextFromGesture();
     if (!ctx) return;
@@ -443,6 +479,12 @@ function playAlignmentBeep() {
 }
 
 function toggleBeeper() {
+  if (state.routerOffline && state.dataSource === "live") {
+    stopBeeperForOffline();
+    pushToast("Router offline — Alignment Beeper disabled until connection resumes.");
+    render();
+    return;
+  }
   const ctx = unlockAudioContextFromGesture();
   state.beeperActive = !state.beeperActive;
   if (beeperTimeout) {
@@ -484,9 +526,12 @@ const SIGNAL_STEPS = [
 ];
 
 function computeSignalStep(cell) {
+  if (state.routerOffline && state.dataSource === "live") {
+    return { step: 0, pct: 0, color: "#EF4444", glow: "rgba(239, 68, 68, 0.35)", cls: "poor", label: "Offline / No Connection" };
+  }
   const score = computeSignalNormalized(cell);
   if (score === null) {
-    return { step: 0, pct: null, color: "#64748B", glow: "transparent", cls: "poor", label: "No Live Telemetry" };
+    return { step: 0, pct: 0, color: "#64748B", glow: "transparent", cls: "poor", label: "No Live Telemetry" };
   }
   const exactPct = Math.max(10, Math.min(100, Math.round(10 + score * 90)));
   const idx = Math.max(1, Math.min(10, Math.round(exactPct / 10)));
@@ -494,17 +539,21 @@ function computeSignalStep(cell) {
 }
 
 function renderSignalRingSvg(cell) {
+  const isOffline = Boolean(state.routerOffline && state.dataSource === "live");
   const tier = computeSignalStep(cell);
-  const pctText = tier.pct !== null ? `${tier.pct}%` : "--%";
-  const rsrpText = (cell.rsrp !== null && cell.rsrp !== undefined) ? `${cell.rsrp} dBm` : "-- dBm";
-  const sinrText = (cell.sinr !== null && cell.sinr !== undefined) ? `${cell.sinr} dB` : "-- dB";
-  const rsrqText = (cell.rsrq !== null && cell.rsrq !== undefined) ? `${cell.rsrq} dB` : "-- dB";
+  const pctText = tier.pct !== null ? `${tier.pct}%` : "0%";
+  const rsrpText = (!isOffline && cell.rsrp !== null && cell.rsrp !== undefined) ? `${cell.rsrp} dBm` : "--";
+  const sinrText = (!isOffline && cell.sinr !== null && cell.sinr !== undefined) ? `${cell.sinr} dB` : "--";
+  const rsrqText = (!isOffline && cell.rsrq !== null && cell.rsrq !== undefined) ? `${cell.rsrq} dB` : "--";
+  const beeperLabel = isOffline
+    ? "Beeper OFF — Router Offline"
+    : (state.beeperActive ? `Beeper ON · ${getCurrentBeeperFreq()} Hz` : "Alignment Beeper");
 
   return `
     <div class="signal-meter-box" role="region" aria-label="5G Signal Meter ${pctText} (${tier.label})">
       <div class="signal-pct-header">
         <div>
-          <span class="carrier-eyebrow" style="display:block; margin-bottom:2px;">${escapeHtml(cell.mode || "5G / LTE")}</span>
+          <span class="carrier-eyebrow" style="display:block; margin-bottom:2px;">${escapeHtml(isOffline ? "--" : (cell.mode || "5G / LTE"))}</span>
           <div class="signal-pct-big tabular" data-step="${tier.step}" style="color: ${tier.color};">
             ${pctText}
           </div>
@@ -514,7 +563,7 @@ function renderSignalRingSvg(cell) {
             <span class="qual-dot" style="background:${tier.color};"></span>
             <span>${tier.label}</span>
           </div>
-          <span class="card-subtitle tabular" style="font-size:0.74rem;">Bar ${tier.step} of 10 · PCI ${escapeHtml(cell.pci)}</span>
+          <span class="card-subtitle tabular" style="font-size:0.74rem;">Bar ${tier.step} of 10 · PCI ${escapeHtml(isOffline ? "--" : cell.pci)}</span>
         </div>
       </div>
 
@@ -527,8 +576,8 @@ function renderSignalRingSvg(cell) {
       <div class="signal-bars-stage" style="--active-tier-color: ${tier.color}; --active-tier-glow: ${tier.glow};"
         role="img" aria-label="${tier.step} of 10 signal bars lit (${pctText})">
         ${SIGNAL_STEPS.map((b) => {
-          const isLit = tier.step > 0 && b.step <= tier.step;
-          const isCurrent = tier.step > 0 && b.step === tier.step;
+          const isLit = !isOffline && tier.step > 0 && b.step <= tier.step;
+          const isCurrent = !isOffline && tier.step > 0 && b.step === tier.step;
           const heightPct = 20 + b.step * 8; // 28% (Bar 1) -> 100% (Bar 10)
           return `
             <div class="sig-bar-col" title="${b.pct}%">
@@ -552,13 +601,13 @@ function renderSignalRingSvg(cell) {
       <div style="display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; width:100%; gap:6px;">
         <div class="qual-badge ${tier.cls} whitespace-nowrap shrink-0">
           <span class="qual-dot"></span>
-          <span>PCI ${escapeHtml(cell.pci)}</span>
+          <span>PCI ${escapeHtml(isOffline ? "--" : cell.pci)}</span>
         </div>
-        <button class="icon-btn ${state.beeperActive ? "beeper-active" : ""}" data-action="toggle-beeper"
-          aria-pressed="${state.beeperActive}"
+        <button class="icon-btn ${state.beeperActive && !isOffline ? "beeper-active" : ""}" data-action="toggle-beeper"
+          aria-pressed="${state.beeperActive && !isOffline}" ${isOffline ? "disabled" : ""}
           title="Audio Antenna Alignment Beeper (Pitch & speed increase with 5G signal)">
-          ${state.beeperActive ? `<span class="beeper-live-dot"></span>` : ICONS.beeper}
-          <span>${state.beeperActive ? `Beeper ON · ${getCurrentBeeperFreq()} Hz` : "Alignment Beeper"}</span>
+          ${state.beeperActive && !isOffline ? `<span class="beeper-live-dot"></span>` : ICONS.beeper}
+          <span>${beeperLabel}</span>
         </button>
       </div>
     </div>
@@ -1034,10 +1083,10 @@ function renderCellularScreen() {
             </div>
           </div>
           <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
-            <button class="icon-btn ${state.beeperActive ? "beeper-active" : ""}" data-action="toggle-beeper"
-              aria-pressed="${state.beeperActive}">
-              ${state.beeperActive ? `<span class="beeper-live-dot"></span>` : ICONS.beeper}
-              <span>${state.beeperActive ? `Beeper ON · ${getCurrentBeeperFreq()} Hz` : "Alignment Beeper"}</span>
+            <button class="icon-btn ${state.beeperActive && !state.routerOffline ? "beeper-active" : ""}" data-action="toggle-beeper"
+              aria-pressed="${state.beeperActive && !state.routerOffline}" ${state.routerOffline && state.dataSource === "live" ? "disabled" : ""}>
+              ${state.beeperActive && !state.routerOffline ? `<span class="beeper-live-dot"></span>` : ICONS.beeper}
+              <span>${state.routerOffline && state.dataSource === "live" ? "Beeper OFF — Router Offline" : (state.beeperActive ? `Beeper ON · ${getCurrentBeeperFreq()} Hz` : "Alignment Beeper")}</span>
             </button>
             <span class="qual-badge excellent whitespace-nowrap shrink-0">
               <span class="qual-dot"></span>
@@ -1648,23 +1697,23 @@ function renderLoginModal() {
 }
 
 function renderUnreachableBanner() {
-  if (!state.unreachableBanner || state.dataSource !== "live") return "";
+  if ((!state.unreachableBanner && !state.routerOffline) || state.dataSource !== "live") return "";
   const lanHost = state.profileLanInput || "192.168.1.1";
   const lanProbe = state.endpointProbeStatus[lanHost];
   const lanReady = Boolean(lanProbe && lanProbe.reachable);
 
   return `
-    <div class="unreachable-banner" role="alert">
+    <div class="unreachable-banner is-offline-alert" role="alert">
       <div style="display:flex; align-items:center; gap:12px; min-width:0; flex:1 1 260px;">
         <div class="card-icon signal">${ICONS.warning}</div>
         <div class="min-w-0">
-          <strong style="font-size:0.95rem; display:block;">
-            Router Unreachable on <code class="mono">${escapeHtml(state.activeRouterHost)}</code>
+          <strong style="font-size:0.95rem; display:block; color:#FCA5A5;">
+            Connection Lost — Router unreachable. Retrying automatically...
           </strong>
           <span class="card-subtitle" style="word-break:normal;">
             ${lanReady
               ? `Local Wi-Fi router responded at ${lanHost}! Tap below to connect in-app without leaving this screen.`
-              : "Enter your Router IP or Hostname below, or switch between Local Wi-Fi and Remote VPN profiles."}
+              : `No response from ${escapeHtml(state.activeRouterHost)} (${escapeHtml(state.lastFetchError || "Timeout")}). Live bars will restore automatically when reachable.`}
           </span>
         </div>
       </div>
@@ -1846,7 +1895,10 @@ export function render() {
   const root = document.getElementById("app");
   if (!root) return;
 
-  const connLabel = `${state.connectionLabel} · ${state.connectionEndpoint}`;
+  const isOffline = Boolean(state.routerOffline && state.dataSource === "live");
+  const connLabel = isOffline
+    ? `Offline · ${state.connectionEndpoint} (Disconnected)`
+    : `${state.connectionLabel} · ${state.connectionEndpoint}`;
 
   let screenHtml = "";
   switch (state.activeTab) {
@@ -1895,7 +1947,7 @@ export function render() {
       <main class="main-stage">
         <header class="topbar">
           <div class="topbar-left">
-            <button class="conn-pill" data-path="${state.connectionPath}" data-action="open-endpoint-modal"
+            <button class="conn-pill" data-path="${state.connectionPath}" data-offline="${isOffline}" data-action="open-endpoint-modal"
               title="Click to switch between Local Wi-Fi (192.168.1.1) and Remote VPN endpoints">
               <span class="pulse-dot"></span>
               <span class="tabular">${escapeHtml(connLabel)} ▾</span>
@@ -2723,6 +2775,7 @@ async function pollTick(forceExtended = false) {
 
     applyLiveTelemetry(tmRes.data, clRes?.data, null, null, null, null, null);
     state.liveLoading = false;
+    state.routerOffline = false;
     state.staleSince = null;
     state.lastFetchError = null;
     state.unreachableBanner = false;
@@ -2750,6 +2803,7 @@ async function pollTick(forceExtended = false) {
   } catch (err) {
     state.liveLoading = false;
     state.lastFetchError = err?.message || "Network error contacting /cgi-bin/ubus";
+    clearStaleTelemetryOnDisconnect();
     if (!state.staleSince) {
       state.staleSince = new Date().toTimeString().slice(0, 5);
     }
