@@ -1144,8 +1144,60 @@ function renderWifiScreen() {
 }
 
 // ============================================================================
-// Screen 4: Cellular & Modem (Tower Distance, IMEI + Luhn, TTL Spoofing, APN)
+// Screen 4: Cellular & Modem — 6-Section RF Engineering Control Panel
 // ============================================================================
+
+const LTE_BAND_OPTIONS = [1, 3, 5, 7, 8, 20, 28, 38, 40, 41];
+const NR_BAND_OPTIONS = [1, 3, 5, 7, 8, 28, 38, 40, 41, 77, 78, 79];
+let identityRevealInterval = null;
+
+function maskIdentityValue(val) {
+  const s = String(val || "").trim();
+  if (!s || s === "—" || s === "--") return "--";
+  if (s.length <= 8) return "•".repeat(s.length);
+  return `${s.slice(0, 4)}${"•".repeat(Math.min(8, s.length - 8))}${s.slice(-4)}`;
+}
+
+function parseGtactBands(gtactStr) {
+  const lte = [];
+  const nr = [];
+  if (!gtactStr) return { lte, nr };
+  const parts = String(gtactStr).split(",").slice(3);
+  for (const raw of parts) {
+    const n = Number(raw.trim());
+    if (!Number.isFinite(n) || n <= 0) continue;
+    if (n >= 101 && n < 200) {
+      lte.push(n - 100);
+    } else if (n >= 501 && n < 600) {
+      nr.push(n - 500);
+    } else if (n >= 5001 && n < 6000) {
+      nr.push(n - 5000);
+    }
+  }
+  return { lte, nr };
+}
+
+function startIdentityReveal10s() {
+  if (identityRevealInterval) {
+    clearInterval(identityRevealInterval);
+    identityRevealInterval = null;
+  }
+  if (state.identityRevealSec > 0) {
+    state.identityRevealSec = 0;
+    render();
+    return;
+  }
+  state.identityRevealSec = 10;
+  render();
+  identityRevealInterval = setInterval(() => {
+    state.identityRevealSec = Math.max(0, (state.identityRevealSec || 0) - 1);
+    if (state.identityRevealSec <= 0) {
+      clearInterval(identityRevealInterval);
+      identityRevealInterval = null;
+    }
+    if (!isAnyModalOpen() && !isFormFieldFocused()) render();
+  }, 1000);
+}
 
 function renderCellularScreen() {
   if (state.dataSource === "live" && state.liveLoading) {
@@ -1155,81 +1207,301 @@ function renderCellularScreen() {
   const c = state.cellular;
   const r = state.router;
   const disabled = !state.editMode ? "disabled" : "";
-  const distStr = formatTowerDistance(c.ta, String(c.primaryBand).startsWith("n"));
+  const isOffline = Boolean(state.routerOffline && state.dataSource === "live");
+  const revealOn = (state.identityRevealSec || 0) > 0;
   const luhn = validateImeiLuhn(c.imeiInput || c.imei);
   const activeTtl = c.ttlEnabled ? Number(c.ttlVal) : 0;
+  const ttlIface = c.ttlIface || "ccmni2";
+  const activeRatMode = c.ratMode || "auto";
+  const selLte = Array.isArray(c.selectedLteBands) ? c.selectedLteBands : [1, 3, 7, 28];
+  const selNr = Array.isArray(c.selectedNrBands) ? c.selectedNrBands : [78];
+  const cellLockActive = Boolean(c.gtCellLock && c.gtCellLock !== "0" && c.gtCellLock !== "0,0,0");
+
+  const modemLabel = c.modemModel || "Fibocom FG360-EAU-11";
+  const fwLabel = c.modemFw || r.kernel || "OpenWrt 19.07.7";
+  const imeiVal = c.imei || "--";
+  const imsiVal = c.imsi || "--";
+  const iccidVal = c.iccid || "--";
+
+  const lteCellReady = !isOffline && c.lteEarfcn && c.ltePci !== null && c.ltePci !== undefined;
+  const nrCellReady = !isOffline && c.nrArfcn && c.nrPci !== null && c.nrPci !== undefined;
+
+  const ratModes = [
+    { id: "auto",   label: "Auto" },
+    { id: "4g",     label: "4G only" },
+    { id: "5g-nsa", label: "5G NSA" },
+    { id: "5g-sa",  label: "5G SA" }
+  ];
 
   return `
     <div class="grid-2">
-      <!-- Live RIL Serving Cell Telemetry + Tower Distance + Audio Beeper -->
+      <!-- 1. Identity (Read-Only) with Reveal 10s Privacy Mask -->
       <article class="card">
         <div class="card-accent-bar signal"></div>
         <div class="card-header flex-wrap gap-2">
           <div class="card-title-wrap min-w-0">
             <div class="card-icon signal">${ICONS.cellular}</div>
             <div class="card-title-text min-w-0">
-              <h1 class="card-title">5G NR / LTE Serving Cell</h1>
-              <p class="card-subtitle">${escapeHtml(c.regState)}</p>
+              <h1 class="card-title">1. Modem Identity</h1>
+              <p class="card-subtitle">${escapeHtml(modemLabel)} · <code class="mono">${escapeHtml(fwLabel)}</code></p>
             </div>
           </div>
           <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
-            <button class="icon-btn ${state.beeperActive && !state.routerOffline ? "beeper-active" : ""}" data-action="toggle-beeper"
-              aria-pressed="${state.beeperActive && !state.routerOffline}" ${state.routerOffline && state.dataSource === "live" ? "disabled" : ""}>
-              ${state.beeperActive && !state.routerOffline ? `<span class="beeper-live-dot"></span>` : ICONS.beeper}
-              <span>${state.routerOffline && state.dataSource === "live" ? "Beeper OFF — Router Offline" : (state.beeperActive ? `Beeper ON · ${getCurrentBeeperFreq()} Hz` : "Alignment Beeper")}</span>
+            <button class="icon-btn ${revealOn ? "beeper-active" : ""}" data-action="toggle-identity-reveal">
+              <span>${revealOn ? `Hide (${state.identityRevealSec}s)` : "Reveal 10s"}</span>
             </button>
-            <span class="qual-badge excellent whitespace-nowrap shrink-0">
-              <span class="qual-dot"></span>
-              <span>SIM ${escapeHtml(c.simStatus)}</span>
-            </span>
+            <button class="icon-btn ${state.beeperActive && !isOffline ? "beeper-active" : ""}" data-action="toggle-beeper"
+              aria-pressed="${state.beeperActive && !isOffline}" ${isOffline ? "disabled" : ""}>
+              ${state.beeperActive && !isOffline ? `<span class="beeper-live-dot"></span>` : ICONS.beeper}
+              <span>${isOffline ? "Beeper OFF — Router Offline" : (state.beeperActive ? `Beeper ON · ${getCurrentBeeperFreq()} Hz` : "Alignment Beeper")}</span>
+            </button>
           </div>
         </div>
 
-        <div class="rf-grid">
-          <div class="rf-stat">
-            <span class="rf-stat-label">Operator / PLMN</span>
-            <span class="rf-stat-val tabular">${escapeHtml(c.operator)} (${escapeHtml(c.plmn)})</span>
+        <div class="id-list">
+          <div class="id-row">
+            <div>
+              <span class="rf-stat-label">Modem &amp; Firmware</span>
+              <div class="id-val mono">${escapeHtml(modemLabel)} (${escapeHtml(fwLabel)})</div>
+            </div>
+            <button class="icon-btn" data-action="copy-identity" data-copy="${escapeHtml(modemLabel + " " + fwLabel)}">Copy</button>
           </div>
-          <div class="rf-stat">
-            <span class="rf-stat-label">Primary 5G Band</span>
-            <span class="rf-stat-val tabular">${escapeHtml(c.primaryBand)}</span>
+          <div class="id-row">
+            <div>
+              <span class="rf-stat-label">IMEI</span>
+              <div class="id-val mono">${escapeHtml(revealOn ? imeiVal : maskIdentityValue(imeiVal))}</div>
+            </div>
+            <button class="icon-btn" data-action="copy-identity" data-copy="${escapeHtml(imeiVal)}">Copy</button>
           </div>
-          <div class="rf-stat">
-            <span class="rf-stat-label">LTE Anchor Band</span>
-            <span class="rf-stat-val tabular">${escapeHtml(c.anchorBand)}</span>
+          <div class="id-row">
+            <div>
+              <span class="rf-stat-label">IMSI</span>
+              <div class="id-val mono">${escapeHtml(revealOn ? imsiVal : maskIdentityValue(imsiVal))}</div>
+            </div>
+            <button class="icon-btn" data-action="copy-identity" data-copy="${escapeHtml(imsiVal)}">Copy</button>
           </div>
-          <div class="rf-stat">
-            <span class="rf-stat-label">RSRP / SINR / RSRQ</span>
-            <span class="rf-stat-val tabular">${c.rsrp ?? "--"} dBm / ${c.sinr ?? "--"} dB / ${c.rsrq ?? "--"} dB</span>
-          </div>
-          <div class="rf-stat">
-            <span class="rf-stat-label">Est. Tower Distance</span>
-            <span class="rf-stat-val tabular">${escapeHtml(distStr)}</span>
-          </div>
-          <div class="rf-stat">
-            <span class="rf-stat-label">PCI / Cell ID</span>
-            <span class="rf-stat-val tabular">${escapeHtml(c.pci)} / ${escapeHtml(c.cellId)}</span>
-          </div>
-          <div class="rf-stat">
-            <span class="rf-stat-label">Live Ping (1.1.1.1)</span>
-            <span class="rf-stat-val tabular">${r.pingMs !== null && r.pingMs !== undefined ? `${r.pingMs} ms` : "—"}</span>
-          </div>
-          <div class="rf-stat">
-            <span class="rf-stat-label">ICCID / IMSI</span>
-            <span class="rf-stat-val mono" style="font-size:0.78rem;">${escapeHtml(c.iccid)}</span>
+          <div class="id-row">
+            <div>
+              <span class="rf-stat-label">ICCID</span>
+              <div class="id-val mono">${escapeHtml(revealOn ? iccidVal : maskIdentityValue(iccidVal))}</div>
+            </div>
+            <button class="icon-btn" data-action="copy-identity" data-copy="${escapeHtml(iccidVal)}">Copy</button>
           </div>
         </div>
       </article>
 
-      <!-- IMEI Changer + Real-Time Luhn Checksum Validator & Generator -->
+      <!-- 2. Network Mode Selector (AT+GTACT) -->
       <article class="card">
+        <div class="card-accent-bar net"></div>
+        <div class="card-header flex-wrap gap-2">
+          <div class="card-title-wrap min-w-0">
+            <div class="card-icon net">${ICONS.signal5g}</div>
+            <div class="card-title-text min-w-0">
+              <h2 class="card-title">2. Network Mode Selector</h2>
+              <p class="card-subtitle">Fibocom <code class="mono">AT+GTACT</code> / <code class="mono">AT+E5GOPT</code> RAT control</p>
+            </div>
+          </div>
+          <span class="qual-badge excellent whitespace-nowrap shrink-0">
+            <span class="qual-dot"></span>
+            <span>${escapeHtml(ratModes.find((m) => m.id === activeRatMode)?.label || activeRatMode)}</span>
+          </span>
+        </div>
+
+        <div class="preset-row">
+          ${ratModes.map((m) => `
+            <button class="preset-pill ${activeRatMode === m.id ? "active" : ""}"
+              data-action="set-modem-mode" data-mode="${m.id}" ${disabled}>
+              ${escapeHtml(m.label)}
+            </button>
+          `).join("")}
+        </div>
+
+        <div class="rf-stat" style="margin-top:4px;">
+          <span class="rf-stat-label">Active AT+GTACT Profile</span>
+          <span class="rf-stat-val mono" style="font-size:0.75rem; word-break:break-all;">${escapeHtml(c.gtactRaw || "—")}</span>
+        </div>
+
+        <!-- 6. Modem Actions (Re-register & Restart modem) -->
+        <div style="border-top:1px solid var(--border-subtle); padding-top:12px; margin-top:4px;">
+          <span class="rf-stat-label" style="display:block; margin-bottom:8px;">6. Modem Actions</span>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn btn-secondary" data-action="modem-reregister" ${disabled}>
+              ${ICONS.refresh} Re-register (CFUN 0/1)
+            </button>
+            <button class="btn btn-danger-signal" data-action="modem-full-restart" ${disabled}>
+              ${ICONS.warning} Restart Modem (CFUN=1,1)
+            </button>
+          </div>
+        </div>
+      </article>
+
+      <!-- 3. Interactive Band & Cell Lock (AT+GTACT + AT+GTCELLLOCK) -->
+      <article class="card" style="grid-column: 1 / -1;">
+        <div class="card-accent-bar signal"></div>
+        <div class="card-header flex-wrap gap-2">
+          <div class="card-title-wrap min-w-0">
+            <div class="card-icon signal">${ICONS.cellular}</div>
+            <div class="card-title-text min-w-0">
+              <h2 class="card-title">3. Interactive Band &amp; Cell Lock</h2>
+              <p class="card-subtitle">Toggle LTE / 5G NR bands (<code class="mono">AT+GTACT</code>) or lock serving PCI (<code class="mono">AT+GTCELLLOCK</code>)</p>
+            </div>
+          </div>
+          <span class="qual-badge ${cellLockActive ? "fair" : "good"} whitespace-nowrap shrink-0">
+            <span class="qual-dot"></span>
+            <span>${cellLockActive ? `Cell Lock: ${escapeHtml(c.gtCellLock)}` : "Cell Lock: Unlocked"}</span>
+          </span>
+        </div>
+
+        <div class="band-lock-group">
+          <span class="rf-stat-label">LTE Bands (4G Anchor &amp; CA)</span>
+          <div class="band-pill-grid">
+            ${LTE_BAND_OPTIONS.map((b) => `
+              <button type="button" class="band-pill lte ${selLte.includes(b) ? "active" : ""}"
+                data-action="toggle-band-pill" data-rat="lte" data-band="${b}" ${disabled}>
+                B${b}
+              </button>
+            `).join("")}
+          </div>
+        </div>
+
+        <div class="band-lock-group">
+          <span class="rf-stat-label">5G NR Bands</span>
+          <div class="band-pill-grid">
+            ${NR_BAND_OPTIONS.map((b) => `
+              <button type="button" class="band-pill nr ${selNr.includes(b) ? "active" : ""}"
+                data-action="toggle-band-pill" data-rat="nr" data-band="${b}" ${disabled}>
+                n${b}
+              </button>
+            `).join("")}
+          </div>
+        </div>
+
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn btn-primary-net" data-action="apply-band-lock" ${disabled}>
+            Apply Band Selection (${selLte.length} LTE · ${selNr.length} NR)
+          </button>
+          <button class="btn btn-secondary" data-action="clear-all-locks" ${disabled}>
+            Clear All Locks (Restore All Bands + Unlock Cell)
+          </button>
+        </div>
+
+        <div class="serving-lock-grid">
+          <div class="serving-lock-row">
+            <div>
+              <span class="rf-stat-label">Serving LTE Cell</span>
+              <div class="rf-stat-val mono" style="font-size:0.80rem;">
+                ${escapeHtml(c.lteBand || "--")} · PCI ${escapeHtml(c.ltePci ?? "--")} · EARFCN ${escapeHtml(c.lteEarfcn ?? "--")}
+              </div>
+            </div>
+            <div style="display:flex; gap:6px;">
+              <button class="icon-btn" data-action="lock-serving-cell" data-rat="4"
+                data-arfcn="${escapeHtml(c.lteEarfcn ?? "")}" data-pci="${escapeHtml(c.ltePci ?? "")}"
+                ${(!state.editMode || !lteCellReady) ? "disabled" : ""}>
+                Lock LTE
+              </button>
+              <button class="icon-btn" data-action="unlock-cell" ${disabled}>Unlock</button>
+            </div>
+          </div>
+
+          <div class="serving-lock-row">
+            <div>
+              <span class="rf-stat-label">Serving 5G NR Cell</span>
+              <div class="rf-stat-val mono" style="font-size:0.80rem;">
+                ${escapeHtml(c.nrBand || "--")} · PCI ${escapeHtml(c.nrPci ?? "--")} · ARFCN ${escapeHtml(c.nrArfcn ?? "--")}
+              </div>
+            </div>
+            <div style="display:flex; gap:6px;">
+              <button class="icon-btn" data-action="lock-serving-cell" data-rat="5"
+                data-arfcn="${escapeHtml(c.nrArfcn ?? "")}" data-pci="${escapeHtml(c.nrPci ?? "")}"
+                ${(!state.editMode || !nrCellReady) ? "disabled" : ""}>
+                Lock 5G NR
+              </button>
+              <button class="icon-btn" data-action="unlock-cell" ${disabled}>Unlock</button>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- 4. APN Configuration (APN + IPv4 / IPv6 / IPv4v6) -->
+      <article class="card">
+        <div class="card-accent-bar signal"></div>
+        <div class="card-header flex-wrap gap-2">
+          <div class="card-title-wrap min-w-0">
+            <div class="card-icon signal">${ICONS.cellular}</div>
+            <div class="card-title-text min-w-0">
+              <h2 class="card-title">4. APN Configuration</h2>
+              <p class="card-subtitle">Persistent <code class="mono">network.wan.apn</code> &amp; PDP stack via UCI</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-grid">
+          <div class="field">
+            <label>WAN APN Name</label>
+            <input class="input mono" type="text" placeholder="e.g. umobile, celcom3g" value="${escapeHtml(c.apn)}" data-cell="apn" ${disabled}/>
+          </div>
+          <div class="field">
+            <label>PDP Protocol</label>
+            <select class="select" data-cell="pdpType" ${disabled}>
+              <option value="IPv4v6" ${c.pdpType === "IPv4v6" ? "selected" : ""}>IPv4v6 (Dual Stack)</option>
+              <option value="IPv4" ${c.pdpType === "IPv4" ? "selected" : ""}>IPv4 Only</option>
+              <option value="IPv6" ${c.pdpType === "IPv6" ? "selected" : ""}>IPv6 Only</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <button class="btn btn-primary-net" data-action="apply-pdn" ${disabled}>
+            ${ICONS.refresh} Save &amp; Restart WAN (ifup wan)
+          </button>
+        </div>
+      </article>
+
+      <!-- 5. TTL / Hop Limit Switcher (Off, 64, 65, 128) -->
+      <article class="card">
+        <div class="card-accent-bar net"></div>
+        <div class="card-header flex-wrap gap-2">
+          <div class="card-title-wrap min-w-0">
+            <div class="card-icon net">${ICONS.shield}</div>
+            <div class="card-title-text min-w-0">
+              <h2 class="card-title">5. TTL / Hop Limit Switcher</h2>
+              <p class="card-subtitle">Deduplicated IPv4 TTL &amp; IPv6 HL mangle rules on <code class="mono">${escapeHtml(ttlIface)}</code></p>
+            </div>
+          </div>
+          <span class="qual-badge ${c.ttlEnabled ? "excellent" : "fair"} whitespace-nowrap shrink-0">
+            <span class="qual-dot"></span>
+            <span>${c.ttlEnabled ? `Applied on ${escapeHtml(ttlIface)} (${c.ttlVal})` : "TTL Off (Stock)"}</span>
+          </span>
+        </div>
+
+        <div class="preset-row">
+          <button class="preset-pill ${!c.ttlEnabled ? "active" : ""}" data-action="apply-ttl" data-ttl="off" ${disabled}>Off</button>
+          <button class="preset-pill ${c.ttlEnabled && activeTtl === 64 ? "active" : ""}" data-action="apply-ttl" data-ttl="64" ${disabled}>64</button>
+          <button class="preset-pill ${c.ttlEnabled && activeTtl === 65 ? "active" : ""}" data-action="apply-ttl" data-ttl="65" ${disabled}>65</button>
+          <button class="preset-pill ${c.ttlEnabled && activeTtl === 128 ? "active" : ""}" data-action="apply-ttl" data-ttl="128" ${disabled}>128</button>
+        </div>
+
+        <div style="display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap;">
+          <div class="field" style="flex:1; min-width:130px;">
+            <label>Custom TTL / Hop Limit (1–255)</label>
+            <input class="input mono" type="number" min="1" max="255"
+              value="${escapeHtml(c.ttlCustomInput)}" data-input="ttlCustomInput" ${disabled}/>
+          </div>
+          <button class="btn btn-primary-net" data-action="apply-ttl-custom" ${disabled}>
+            Apply Custom
+          </button>
+        </div>
+      </article>
+
+      <!-- IMEI Changer + Real-Time Luhn Checksum Validator -->
+      <article class="card" style="grid-column: 1 / -1;">
         <div class="card-accent-bar signal"></div>
         <div class="card-header flex-wrap gap-2">
           <div class="card-title-wrap min-w-0">
             <div class="card-icon signal">${ICONS.signal5g}</div>
             <div class="card-title-text min-w-0">
-              <h2 class="card-title">FG360 IMEI Manager &amp; Luhn Generator</h2>
-              <p class="card-subtitle">Current Active IMEI: <code class="mono">${escapeHtml(c.imei || "—")}</code></p>
+              <h2 class="card-title">FG360 IMEI Manager &amp; Luhn Validator</h2>
+              <p class="card-subtitle">Active IMEI: <code class="mono">${escapeHtml(revealOn ? imeiVal : maskIdentityValue(imeiVal))}</code> · Logged to <code class="mono">/root/aw1000-imei-backups/</code></p>
             </div>
           </div>
           <span class="qual-badge ${luhn.valid ? "excellent" : "poor"} whitespace-nowrap shrink-0">
@@ -1246,91 +1518,10 @@ function renderCellularScreen() {
             <button class="btn btn-secondary" data-action="generate-imei" ${disabled}>
               Generate Valid IMEI
             </button>
+            <button class="btn btn-danger-signal" data-action="apply-imei" ${(!state.editMode || !luhn.valid) ? "disabled" : ""}>
+              Apply IMEI &amp; Restart Modem
+            </button>
           </div>
-        </div>
-
-        <div style="display:flex; gap:10px; flex-wrap:wrap;">
-          <button class="btn btn-danger-signal" data-action="apply-imei" ${(!state.editMode || !luhn.valid) ? "disabled" : ""}>
-            Apply IMEI &amp; Restart Modem
-          </button>
-          <button class="btn btn-secondary" data-action="modem-reset" ${disabled}>
-            ${ICONS.refresh} Restart Modem Only (CFUN 4/1)
-          </button>
-        </div>
-
-        <div class="card-subtitle" style="padding:10px 12px; background:var(--bg-subtle); border-radius:12px; word-break:normal;">
-          <strong>Safety:</strong> Previous IMEI is logged to <code class="mono">/root/aw1000-imei-backups/imei-history.log</code> before applying, and only the FG360 radio cycles (router &amp; Wi-Fi stay up).
-        </div>
-      </article>
-
-      <!-- TTL / HL Spoofing Control (Hotspot Bypass on ccmni2) -->
-      <article class="card">
-        <div class="card-accent-bar net"></div>
-        <div class="card-header flex-wrap gap-2">
-          <div class="card-title-wrap min-w-0">
-            <div class="card-icon net">${ICONS.shield}</div>
-            <div class="card-title-text min-w-0">
-              <h2 class="card-title">TTL / HL Spoofing (Carrier Hotspot Bypass)</h2>
-              <p class="card-subtitle">IPv4 <code class="mono">iptables --ttl-set</code> &amp; IPv6 <code class="mono">ip6tables --hl-set</code> on <code class="mono">POSTROUTING</code></p>
-            </div>
-          </div>
-          <span class="qual-badge ${c.ttlEnabled ? "excellent" : "fair"} whitespace-nowrap shrink-0">
-            <span class="qual-dot"></span>
-            <span>${c.ttlEnabled ? `TTL ${c.ttlVal} Active` : "TTL Spoof Off"}</span>
-          </span>
-        </div>
-
-        <div class="preset-row">
-          <button class="preset-pill ${!c.ttlEnabled ? "active" : ""}" data-action="apply-ttl" data-ttl="off" ${disabled}>Off (Stock)</button>
-          <button class="preset-pill ${c.ttlEnabled && activeTtl === 64 ? "active" : ""}" data-action="apply-ttl" data-ttl="64" ${disabled}>TTL 64 (Standard)</button>
-          <button class="preset-pill ${c.ttlEnabled && activeTtl === 65 ? "active" : ""}" data-action="apply-ttl" data-ttl="65" ${disabled}>TTL 65 (Phone Tethering)</button>
-          <button class="preset-pill ${c.ttlEnabled && activeTtl === 128 ? "active" : ""}" data-action="apply-ttl" data-ttl="128" ${disabled}>TTL 128 (Windows)</button>
-        </div>
-
-        <div style="display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap;">
-          <div class="field" style="flex:1; min-width:130px;">
-            <label>Custom TTL / Hop Limit (1–255)</label>
-            <input class="input mono" type="number" min="1" max="255"
-              value="${escapeHtml(c.ttlCustomInput)}" data-input="ttlCustomInput" ${disabled}/>
-          </div>
-          <button class="btn btn-primary-net" data-action="apply-ttl-custom" ${disabled}>
-            Apply Custom TTL
-          </button>
-        </div>
-      </article>
-
-      <!-- APN / PDN Profile Control -->
-      <article class="card">
-        <div class="card-accent-bar signal"></div>
-        <div class="card-header flex-wrap gap-2">
-          <div class="card-title-wrap min-w-0">
-            <div class="card-icon signal">${ICONS.cellular}</div>
-            <div class="card-title-text min-w-0">
-              <h2 class="card-title">APN / PDN Profile</h2>
-              <p class="card-subtitle">Persistent <code class="mono">network.wan.apn</code> &amp; <code class="mono">3ginfo</code> profile</p>
-            </div>
-          </div>
-        </div>
-
-        <div class="form-grid">
-          <div class="field">
-            <label>APN Name</label>
-            <input class="input" type="text" value="${escapeHtml(c.apn)}" data-cell="apn" ${disabled}/>
-          </div>
-          <div class="field">
-            <label>PDP Type</label>
-            <select class="select" data-cell="pdpType" ${disabled}>
-              <option value="IPv4v6" ${c.pdpType === "IPv4v6" ? "selected" : ""}>IPv4v6 (Dual Stack)</option>
-              <option value="IPv4" ${c.pdpType === "IPv4" ? "selected" : ""}>IPv4 Only</option>
-              <option value="IPv6" ${c.pdpType === "IPv6" ? "selected" : ""}>IPv6 Only</option>
-            </select>
-          </div>
-        </div>
-
-        <div style="display:flex; gap:10px; flex-wrap:wrap;">
-          <button class="btn btn-primary-net" data-action="apply-pdn" ${disabled}>
-            Apply APN / PDN Profile
-          </button>
         </div>
       </article>
     </div>
@@ -1544,6 +1735,22 @@ function renderSystemScreen() {
           ${logs.length === 0 ? `<div>No log entries matching filter.</div>` : logs.map((line) => `<div style="padding:3px 0; border-bottom:1px dashed var(--border-subtle); word-break:break-all;">${escapeHtml(line)}</div>`).join("")}
         </div>
       </article>
+
+      <footer class="card" style="grid-column: 1 / -1; padding:14px 18px; background:var(--bg-subtle); border:1px solid var(--border-subtle);">
+        <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px;">
+          <p class="card-subtitle" style="margin:0; font-size:0.80rem; line-height:1.55; word-break:normal;">
+            <span class="mono" style="color:var(--text-wifi); font-weight:700;">HTTP 200 OK</span> · Engineered under a bridge in KL by <strong>Eddie Alexander (Sky Walker Consortium)</strong> so your 5G bars stay 100% bright green. If your speed hits 500 Mbps, buy the dev a Teh Tarik!
+          </p>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; shrink:0;">
+            <a class="icon-btn" href="https://github.com/sky12388/aw1000-control" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">
+              GitHub Repo ↗
+            </a>
+            <a class="icon-btn" href="https://ko-fi.com/aw1000" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">
+              ☕ Ko-fi (Teh Tarik) ↗
+            </a>
+          </div>
+        </div>
+      </footer>
     </div>
   `;
 }
@@ -2431,14 +2638,203 @@ function setupEvents() {
         }
       };
       render();
-    } else if (action === "apply-pdn") {
+    } else if (action === "toggle-identity-reveal") {
+      startIdentityReveal10s();
+    } else if (action === "copy-identity") {
+      const val = actionEl.getAttribute("data-copy") || "";
+      if (val && val !== "--") {
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(val);
+          }
+          pushToast("Copied to clipboard.");
+        } catch (_) {
+          pushToast("Copy failed (clipboard restricted).");
+        }
+      }
+    } else if (action === "set-modem-mode") {
+      if (!state.editMode) return;
+      const mode = actionEl.getAttribute("data-mode");
+      if (!mode) return;
+      const labels = { auto: "Auto (5G + 4G)", "4g": "4G LTE Only", "5g-nsa": "5G NSA Priority", "5g-sa": "5G SA Only" };
+      state.confirmModal = {
+        title: `Switch Network Mode to ${labels[mode] || mode}?`,
+        impact: `Applies Fibocom AT+GTACT / AT+E5GOPT for '${mode}' and cycles the radio (CFUN 4/1). Cellular WAN drops for ~15–25 seconds.`,
+        lifelineNote: "Local Wi-Fi and LAN SSH remain up; VPN reconnects automatically once registered.",
+        onConfirm: async () => {
+          if (state.dataSource === "live") {
+            const [res] = await ubusBatchCall([{ object: "aw1000", method: "modem_mode", args: { mode } }]);
+            if (res?.data && res.data.ok === false) {
+              pushToast(`Mode switch failed: ${res.data.error || "Unknown error"}`);
+              return;
+            }
+          }
+          state.cellular.ratMode = mode;
+          pushToast(`Network mode set to ${labels[mode] || mode}. Cycling radio…`);
+          setTimeout(() => pollTick(true), 6000);
+        }
+      };
+      render();
+    } else if (action === "toggle-band-pill") {
+      if (!state.editMode) return;
+      const rat = actionEl.getAttribute("data-rat");
+      const band = Number(actionEl.getAttribute("data-band"));
+      if (!Number.isFinite(band)) return;
+      if (rat === "lte") {
+        const cur = new Set(Array.isArray(state.cellular.selectedLteBands) ? state.cellular.selectedLteBands : []);
+        if (cur.has(band)) cur.delete(band); else cur.add(band);
+        state.cellular.selectedLteBands = Array.from(cur).sort((a, b) => a - b);
+      } else if (rat === "nr") {
+        const cur = new Set(Array.isArray(state.cellular.selectedNrBands) ? state.cellular.selectedNrBands : []);
+        if (cur.has(band)) cur.delete(band); else cur.add(band);
+        state.cellular.selectedNrBands = Array.from(cur).sort((a, b) => a - b);
+      }
+      state.cellular.bandSelectionDirty = true;
+      render();
+    } else if (action === "apply-band-lock") {
+      if (!state.editMode) return;
+      const lte = Array.isArray(state.cellular.selectedLteBands) ? state.cellular.selectedLteBands : [];
+      const nr = Array.isArray(state.cellular.selectedNrBands) ? state.cellular.selectedNrBands : [];
+      if (lte.length === 0 && nr.length === 0) {
+        pushToast("Select at least one LTE or 5G NR band.");
+        return;
+      }
+      const parts = [];
+      if (lte.length > 0) parts.push(`4,${lte.join("/")}`);
+      if (nr.length > 0) parts.push(`5,${nr.join("/")}`);
+      const arg = parts.join(";");
+      state.confirmModal = {
+        title: `Apply Band Lock (${arg})?`,
+        impact: `Applies AT+GTACT band selection via modem_status --set_bandlock and saves to UCI. Cellular WAN will re-register for ~10–20 seconds.`,
+        lifelineNote: "Use 'Clear All Locks' anytime to restore all factory LTE + 5G bands.",
+        onConfirm: async () => {
+          if (state.dataSource === "live") {
+            const [res] = await ubusBatchCall([{ object: "aw1000", method: "band_lock", args: { arg } }]);
+            if (res?.data && res.data.ok === false) {
+              pushToast(`Band lock failed: ${res.data.error || "Unknown error"}`);
+              return;
+            }
+          }
+          state.cellular.bandSelectionDirty = false;
+          pushToast(`Band lock applied (${arg}).`);
+          setTimeout(() => pollTick(true), 5000);
+        }
+      };
+      render();
+    } else if (action === "clear-all-locks") {
       if (!state.editMode) return;
       state.confirmModal = {
-        title: `Apply APN / PDN Profile (${state.cellular.apn})?`,
-        impact: `Updates network.wan.apn (${state.cellular.pdpType}) and reconnects ccmni2. Cellular WAN will drop for ~8–15 seconds.`,
+        title: "Clear All Band & Cell Locks?",
+        impact: "Restores all supported LTE + 5G NR bands ('all') and clears AT+GTCELLLOCK ('unlock'). Cellular WAN briefly re-registers.",
+        lifelineNote: "Safest recovery option if a band or PCI lock degrades signal.",
+        onConfirm: async () => {
+          if (state.dataSource === "live") {
+            await ubusBatchCall([
+              { object: "aw1000", method: "cell_lock", args: { arg: "unlock" } },
+              { object: "aw1000", method: "band_lock", args: { arg: "all" } }
+            ]);
+          }
+          state.cellular.gtCellLock = "0";
+          state.cellular.bandSelectionDirty = false;
+          pushToast("Cleared all band and cell locks.");
+          setTimeout(() => pollTick(true), 5000);
+        }
+      };
+      render();
+    } else if (action === "lock-serving-cell") {
+      if (!state.editMode) return;
+      const rat = actionEl.getAttribute("data-rat");
+      const arfcn = actionEl.getAttribute("data-arfcn");
+      const pci = actionEl.getAttribute("data-pci");
+      if (!rat || !arfcn || !pci) return;
+      const arg = `${rat},${arfcn}/${pci}`;
+      state.confirmModal = {
+        title: `Lock Serving ${rat === "5" ? "5G NR" : "LTE"} Cell (PCI ${pci})?`,
+        impact: `Applies AT+GTCELLLOCK=${arg} and persists to UCI. Modem will stay pinned to PCI ${pci} (ARFCN ${arfcn}).`,
+        lifelineNote: "Tap 'Unlock' or 'Clear All Locks' anytime to release the PCI lock.",
+        onConfirm: async () => {
+          if (state.dataSource === "live") {
+            const [res] = await ubusBatchCall([{ object: "aw1000", method: "cell_lock", args: { arg } }]);
+            if (res?.data && res.data.ok === false) {
+              pushToast(`Cell lock failed: ${res.data.error || "Unknown error"}`);
+              return;
+            }
+          }
+          state.cellular.gtCellLock = arg;
+          pushToast(`Locked serving cell: ${arg}`);
+          setTimeout(() => pollTick(true), 4000);
+        }
+      };
+      render();
+    } else if (action === "unlock-cell") {
+      if (!state.editMode) return;
+      state.confirmModal = {
+        title: "Unlock Cell PCI Lock (AT+GTCELLLOCK=0)?",
+        impact: "Releases any active LTE/NR PCI lock so the modem freely selects the strongest cell.",
+        lifelineNote: "No reboot required; WAN stays connected.",
+        onConfirm: async () => {
+          if (state.dataSource === "live") {
+            await ubusBatchCall([{ object: "aw1000", method: "cell_lock", args: { arg: "unlock" } }]);
+          }
+          state.cellular.gtCellLock = "0";
+          pushToast("Cell PCI lock cleared.");
+          setTimeout(() => pollTick(true), 3000);
+        }
+      };
+      render();
+    } else if (action === "apply-pdn") {
+      if (!state.editMode) return;
+      const cleanApn = String(state.cellular.apn || "").trim();
+      if (!cleanApn) {
+        pushToast("APN cannot be empty.");
+        return;
+      }
+      state.confirmModal = {
+        title: `Save APN '${cleanApn}' (${state.cellular.pdpType}) & Restart WAN?`,
+        impact: `Updates UCI network.wan.apn + iptype (${state.cellular.pdpType}) and runs 'ifup wan'. Cellular WAN drops for ~8–15 seconds.`,
         lifelineNote: "LAN access stays up; remote VPN overlay resumes automatically once ccmni2 reconnects.",
         onConfirm: async () => {
-          pushToast(`PDN profile updated: APN '${state.cellular.apn}' (${state.cellular.pdpType}).`);
+          if (state.dataSource === "live") {
+            const [res] = await ubusBatchCall([{
+              object: "aw1000",
+              method: "apn_set",
+              args: { apn: cleanApn, iptype: state.cellular.pdpType || "IPv4v6" }
+            }]);
+            if (res?.data && res.data.ok === false) {
+              pushToast(`APN update failed: ${res.data.error || "Unknown error"}`);
+              return;
+            }
+          }
+          pushToast(`APN saved ('${cleanApn}', ${state.cellular.pdpType}) — restarting WAN…`);
+          setTimeout(() => pollTick(true), 5000);
+        }
+      };
+      render();
+    } else if (action === "modem-reregister") {
+      if (!state.editMode) return;
+      state.confirmModal = {
+        title: "Re-register Cellular Radio (AT+CFUN=0 → 1)?",
+        impact: "Cycles the FG360 radio stack for fast tower reconnection (~10–20 seconds). Router and Wi-Fi stay up.",
+        lifelineNote: "Local LAN and SSH remain active; VPN reconnects automatically.",
+        onConfirm: async () => {
+          if (state.dataSource === "live") {
+            await ubusBatchCall([{ object: "aw1000", method: "modem_reregister", args: {} }]);
+          }
+          pushToast("Modem re-registration (CFUN=0 → 1) triggered.");
+        }
+      };
+      render();
+    } else if (action === "modem-full-restart") {
+      if (!state.editMode) return;
+      state.confirmModal = {
+        title: "Full Modem Module Reset (AT+CFUN=1,1)?",
+        impact: "Reboots the Fibocom FG360 5G modem module completely without rebooting OpenWrt. Cellular WAN drops for ~35–55 seconds.",
+        lifelineNote: "Local Wi-Fi and LAN SSH remain active; remote VPN reconnects as soon as WAN is up.",
+        onConfirm: async () => {
+          if (state.dataSource === "live") {
+            await ubusBatchCall([{ object: "aw1000", method: "modem_restart", args: { full: true } }]);
+          }
+          pushToast("Full FG360 modem reset (CFUN=1,1) triggered.");
         }
       };
       render();
@@ -2675,8 +3071,10 @@ function applyLiveTelemetry(tm, cl, st, mg, wg, bl, lg) {
       state.cellular.pci = nr.pci || lte.pci || "—";
       state.cellular.lteBand = lte.band ? `B${lte.band}` : null;
       state.cellular.ltePci = lte.pci !== undefined && lte.pci !== null ? lte.pci : null;
+      state.cellular.lteEarfcn = lte.arfcn !== undefined && lte.arfcn !== null ? lte.arfcn : null;
       state.cellular.nrBand = nr.band ? `n${nr.band}` : null;
       state.cellular.nrPci = nr.pci !== undefined && nr.pci !== null ? nr.pci : null;
+      state.cellular.nrArfcn = nr.arfcn !== undefined && nr.arfcn !== null ? nr.arfcn : null;
       state.cellular.cellId = lte.cid ? `0x${Number(lte.cid).toString(16).toUpperCase()}` : "—";
       state.cellular.ta = typeof nr.ta === "number" ? nr.ta : null;
       state.cellular.primaryBand = nr.band ? `n${nr.band}${nr.bw ? ` (${nr.bw})` : ""}` : (lte.band ? `B${lte.band}` : "—");
@@ -2735,6 +3133,8 @@ function applyLiveTelemetry(tm, cl, st, mg, wg, bl, lg) {
   if (st && typeof st === "object") {
     if (st.op) state.cellular.operator = st.op;
     if (st.mcc && st.mnc) state.cellular.plmn = `${st.mcc}${st.mnc}`;
+    if (st.modem) state.cellular.modemModel = st.modem;
+    if (st.fw || st.rev) state.cellular.modemFw = st.fw || st.rev;
     if (st.imei) {
       state.cellular.imei = st.imei;
       if (!state.cellular.imeiInput) state.cellular.imeiInput = st.imei;
@@ -2747,14 +3147,31 @@ function applyLiveTelemetry(tm, cl, st, mg, wg, bl, lg) {
   }
 
   if (mg && typeof mg === "object") {
+    if (mg.mode) state.cellular.ratMode = mg.mode;
+    if (mg.gtact) {
+      state.cellular.gtactRaw = mg.gtact;
+      if (!state.cellular.bandSelectionDirty) {
+        const parsed = parseGtactBands(mg.gtact);
+        if (parsed.lte.length > 0) state.cellular.selectedLteBands = parsed.lte;
+        if (parsed.nr.length > 0) state.cellular.selectedNrBands = parsed.nr;
+      }
+    }
+    if (mg.gtcelllock !== undefined) {
+      state.cellular.gtCellLock = String(mg.gtcelllock || "0").trim();
+    }
     if (mg.ttl) {
       state.cellular.ttlEnabled = Boolean(mg.ttl.enabled || mg.ttl.live);
       const v = mg.ttl.live || mg.ttl.val || 64;
       state.cellular.ttlVal = Number(v);
+      if (mg.ttl.iface) state.cellular.ttlIface = mg.ttl.iface;
       if (!state.editMode) state.cellular.ttlCustomInput = String(v);
     }
-    if (mg.apn && mg.apn.apn && !state.editMode) {
-      state.cellular.apn = mg.apn.apn;
+    if (mg.apn && !state.editMode) {
+      if (mg.apn.apn) state.cellular.apn = mg.apn.apn;
+      if (mg.apn.iptype !== undefined && mg.apn.iptype !== null) {
+        const ipMap = { 1: "IPv4", 2: "IPv6", 3: "IPv4v6" };
+        state.cellular.pdpType = ipMap[Number(mg.apn.iptype)] || "IPv4v6";
+      }
     }
   }
 

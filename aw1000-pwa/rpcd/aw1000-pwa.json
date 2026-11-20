@@ -53,6 +53,11 @@
           "imei_set",
           "ttl_set",
           "mac_acl",
+          "modem_mode",
+          "band_lock",
+          "cell_lock",
+          "apn_set",
+          "modem_reregister",
           "modem_restart",
           "backup_create"
         ]

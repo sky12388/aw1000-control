@@ -94,7 +94,23 @@ case "$1" in
 			json_add_string "action" "block|unblock"
 			json_add_string "client_ip" "caller-ip"
 		json_close_object
+		json_add_object "modem_mode"
+			json_add_string "mode" "auto|4g|5g-nsa|5g-sa"
+		json_close_object
+		json_add_object "band_lock"
+			json_add_string "arg" "4,1/3/28;5,78|all"
+		json_close_object
+		json_add_object "cell_lock"
+			json_add_string "arg" "4,9510/226|unlock"
+		json_close_object
+		json_add_object "apn_set"
+			json_add_string "apn" "string"
+			json_add_string "iptype" "IPv4|IPv6|IPv4v6|1|2|3"
+		json_close_object
+		json_add_object "modem_reregister"
+		json_close_object
 		json_add_object "modem_restart"
+			json_add_boolean "full" 0
 		json_close_object
 		json_add_object "backup_create"
 			json_add_string "tag" "manual"
@@ -544,8 +560,139 @@ LUA
 				json_dump
 				;;
 
-			modem_restart)
+			modem_mode)
+				read -r input
+				json_load "$input" 2>/dev/null
+				json_get_var mode mode
+				case "$mode" in
+					auto)
+						$MODEM_STATUS --run_atcmd 'AT+E5GOPT=7' >/dev/null 2>&1
+						$MODEM_STATUS --run_atcmd 'AT+GTACT=20,6,3' >/dev/null 2>&1
+						;;
+					4g)
+						$MODEM_STATUS --run_atcmd 'AT+E5GOPT=1' >/dev/null 2>&1
+						$MODEM_STATUS --run_atcmd 'AT+GTACT=2,3' >/dev/null 2>&1
+						;;
+					5g-nsa)
+						$MODEM_STATUS --run_atcmd 'AT+E5GOPT=5' >/dev/null 2>&1
+						$MODEM_STATUS --run_atcmd 'AT+GTACT=17,6,' >/dev/null 2>&1
+						;;
+					5g-sa)
+						$MODEM_STATUS --run_atcmd 'AT+E5GOPT=3' >/dev/null 2>&1
+						$MODEM_STATUS --run_atcmd 'AT+GTACT=14,6' >/dev/null 2>&1
+						;;
+					*)
+						echo '{"ok":false,"error":"Invalid mode (use auto|4g|5g-nsa|5g-sa)"}'
+						exit 0
+						;;
+				esac
+				(
+					$MODEM_STATUS --run_atcmd 'AT+CFUN=4' >/dev/null 2>&1
+					sleep 2
+					$MODEM_STATUS --run_atcmd 'AT+CFUN=1' >/dev/null 2>&1
+				) &
+				json_init
+				json_add_boolean "ok" 1
+				json_add_string "mode" "$mode"
+				json_dump
+				;;
+
+			band_lock)
+				read -r input
+				json_load "$input" 2>/dev/null
+				json_get_var arg arg
+				if [ -z "$arg" ]; then
+					echo '{"ok":false,"error":"Missing band_lock arg"}'
+					exit 0
+				fi
+				if [ "$arg" != "all" ]; then
+					case "$arg" in
+						*[!0-9,/\;]*)
+							echo '{"ok":false,"error":"Invalid band_lock arg"}'
+							exit 0
+							;;
+					esac
+				fi
 				if [ -x "$CTL" ]; then
+					"$CTL" band-lock "$arg"
+				else
+					echo '{"ok":false,"error":"aw1000-ctl not found"}'
+				fi
+				;;
+
+			cell_lock)
+				read -r input
+				json_load "$input" 2>/dev/null
+				json_get_var arg arg
+				if [ -z "$arg" ]; then
+					echo '{"ok":false,"error":"Missing cell_lock arg"}'
+					exit 0
+				fi
+				if [ "$arg" != "unlock" ] && [ "$arg" != "0,0,0" ]; then
+					case "$arg" in
+						*[!0-9,/\;]*)
+							echo '{"ok":false,"error":"Invalid cell_lock arg"}'
+							exit 0
+							;;
+					esac
+				fi
+				if [ -x "$CTL" ]; then
+					"$CTL" cell-lock "$arg"
+				else
+					echo '{"ok":false,"error":"aw1000-ctl not found"}'
+				fi
+				;;
+
+			apn_set)
+				read -r input
+				json_load "$input" 2>/dev/null
+				json_get_var apn apn
+				json_get_var iptype iptype
+				clean_apn=$(printf '%s' "$apn" | tr -d '\r\n' | tr -cd 'A-Za-z0-9._-')
+				if [ -z "$clean_apn" ]; then
+					echo '{"ok":false,"error":"APN cannot be empty"}'
+					exit 0
+				fi
+				case "$iptype" in
+					IPv4|ipv4|1) ipnum="1" ;;
+					IPv6|ipv6|2) ipnum="2" ;;
+					IPv4v6|ipv4v6|3|"") ipnum="3" ;;
+					*) ipnum="3" ;;
+				esac
+				if [ -x "$CTL" ]; then
+					"$CTL" apn-set "$clean_apn" "$ipnum"
+				else
+					uci -q set "network.wan.apn=$clean_apn"
+					uci -q set "network.wan.iptype=$ipnum"
+					uci -q commit network
+					/sbin/ifup wan >/dev/null 2>&1 &
+					printf '{"ok":true,"apn":"%s","iptype":%s}\n' "$clean_apn" "$ipnum"
+				fi
+				;;
+
+			modem_reregister)
+				(
+					$MODEM_STATUS --run_atcmd 'AT+CFUN=0' >/dev/null 2>&1
+					sleep 2
+					$MODEM_STATUS --run_atcmd 'AT+CFUN=1' >/dev/null 2>&1
+				) &
+				echo '{"ok":true,"action":"reregister"}'
+				;;
+
+			modem_restart)
+				read -r input 2>/dev/null || true
+				full=0
+				if [ -n "$input" ]; then
+					json_load "$input" 2>/dev/null || true
+					json_get_var full full 2>/dev/null || true
+				fi
+				if [ "$full" = "1" ] || [ "$full" = "true" ]; then
+					(
+						$MODEM_STATUS --run_atcmd 'AT+CFUN=1,1' >/dev/null 2>&1 || \
+						$MODEM_STATUS --at_cmd 'AT+CFUN=1,1' >/dev/null 2>&1
+					) &
+					echo '{"ok":true,"action":"full_restart"}'
+				elif [ -x "$CTL" ]; then
 					"$CTL" modem-restart
 				else
 					(
@@ -553,7 +700,7 @@ LUA
 						sleep 2
 						$MODEM_STATUS --at_cmd 'AT+CFUN=1' >/dev/null 2>&1
 					) &
-					echo '{"ok":true}'
+					echo '{"ok":true,"action":"radio_restart"}'
 				fi
 				;;
 

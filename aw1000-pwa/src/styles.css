@@ -588,6 +588,95 @@ html, body {
 .rf-foot-ok.ok  { color: #10B981; }
 .rf-foot-ok.bad { color: #EF4444; }
 
+/* Cellular RF Engineering Control Panel */
+.id-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.id-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 11px;
+  border-radius: 10px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+}
+
+.id-val {
+  font-size: 0.80rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-top: 2px;
+  word-break: break-all;
+}
+
+.band-lock-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.band-pill-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.band-pill {
+  min-width: 48px;
+  padding: 6px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+
+.band-pill.lte.active {
+  background: var(--tint-net);
+  color: var(--text-net);
+  border-color: rgba(47, 123, 255, 0.55);
+}
+
+.band-pill.nr.active {
+  background: var(--tint-wifi);
+  color: var(--text-wifi);
+  border-color: rgba(16, 185, 129, 0.55);
+}
+
+.band-pill:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+}
+
+.serving-lock-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-subtle);
+}
+
+.serving-lock-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+}
+
 .pulse-dot {
   width: 8px;
   height: 8px;
