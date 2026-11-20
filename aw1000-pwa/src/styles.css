@@ -442,6 +442,152 @@ html, body {
   border: 1px solid rgba(239, 68, 68, 0.52);
 }
 
+/* Compact Dual-Band RF & Live WAN Telemetry Panel (Hero Card) */
+.rf-dual-panel {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  font-size: 0.76rem;
+}
+
+.rf-dual-panel.is-offline {
+  border-color: rgba(239, 68, 68, 0.42);
+  background: rgba(239, 68, 68, 0.06);
+}
+
+.rf-dual-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.rf-dual-rat {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.78rem;
+  color: var(--text-primary);
+}
+
+.rf-dual-carrier {
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: 0.74rem;
+}
+
+.rf-dual-combo {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--tint-net);
+  color: var(--text-net);
+  font-size: 0.71rem;
+  font-weight: 700;
+}
+
+.rf-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.rf-status-dot.ok {
+  background: #10B981;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.25);
+}
+
+.rf-status-dot.bad {
+  background: #EF4444;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.28);
+}
+
+.rf-dual-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 0.74rem;
+  color: var(--text-primary);
+}
+
+.mini-sig-bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 12px;
+  width: 16px;
+  flex-shrink: 0;
+}
+
+.mini-sig-bars i {
+  display: block;
+  width: 3px;
+  border-radius: 1px;
+  background: var(--border-strong, rgba(148, 163, 184, 0.35));
+}
+
+.mini-sig-bars.tone-good i.on { background: #10B981; }
+.mini-sig-bars.tone-warn i.on { background: #F59E0B; }
+.mini-sig-bars.tone-poor i.on { background: #EF4444; }
+
+.rf-band-tag {
+  font-weight: 800;
+  min-width: 54px;
+  font-size: 0.74rem;
+}
+
+.rf-band-tag.lte { color: var(--text-net); }
+.rf-band-tag.nr  { color: var(--text-wifi); }
+
+.rf-kv {
+  color: var(--text-primary);
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.rf-kv em {
+  font-style: normal;
+  color: var(--text-muted);
+  font-weight: 500;
+  margin-right: 2px;
+}
+
+.rf-warn-chip {
+  margin-left: auto;
+  font-size: 0.80rem;
+  line-height: 1;
+}
+
+.rf-dual-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border-subtle);
+  font-size: 0.73rem;
+  color: var(--text-secondary);
+}
+
+.rf-foot-ok {
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.rf-foot-ok.ok  { color: #10B981; }
+.rf-foot-ok.bad { color: #EF4444; }
+
 .pulse-dot {
   width: 8px;
   height: 8px;

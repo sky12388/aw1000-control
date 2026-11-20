@@ -439,6 +439,10 @@ function clearStaleTelemetryOnDisconnect() {
   state.cellular.regState = "Offline / No Connection";
   state.cellular.primaryBand = "--";
   state.cellular.anchorBand = "--";
+  state.cellular.lteBand = null;
+  state.cellular.ltePci = null;
+  state.cellular.nrBand = null;
+  state.cellular.nrPci = null;
   state.cellular.caStatus = "--";
   state.cellular.ta = null;
   state.router.pingMs = null;
@@ -538,6 +542,90 @@ function computeSignalStep(cell) {
   return { ...SIGNAL_STEPS[idx - 1], pct: exactPct };
 }
 
+function renderMiniSignalBars(rsrp, sinr, isOffline) {
+  if (isOffline || rsrp === null || rsrp === undefined) {
+    return `
+      <span class="mini-sig-bars is-offline" aria-hidden="true">
+        <i style="height:28%"></i><i style="height:52%"></i><i style="height:76%"></i><i style="height:100%"></i>
+      </span>
+    `;
+  }
+  let lit = 1;
+  if (rsrp >= -90 && (sinr === null || sinr === undefined || sinr >= 10)) lit = 4;
+  else if (rsrp >= -100 && (sinr === null || sinr === undefined || sinr >= 3)) lit = 3;
+  else if (rsrp >= -112 && (sinr === null || sinr === undefined || sinr >= -2)) lit = 2;
+  else lit = 1;
+
+  const tone = lit >= 3 ? "good" : (lit === 2 ? "warn" : "poor");
+  const heights = [28, 52, 76, 100];
+  return `
+    <span class="mini-sig-bars tone-${tone}" aria-hidden="true">
+      ${heights.map((h, idx) => `<i class="${idx < lit ? "on" : ""}" style="height:${h}%"></i>`).join("")}
+    </span>
+  `;
+}
+
+function renderDualBandRfPanel(cell, isOffline) {
+  const ratLabel = isOffline ? "Offline" : (cell.mode === "NR-NSA" ? "5G NSA" : (cell.mode === "NR-SA" ? "5G SA" : (cell.mode || "4G LTE")));
+  const lteBand = isOffline ? null : (cell.lteBand || (cell.anchorBand && cell.anchorBand.startsWith("B") ? cell.anchorBand.split(" ")[0] : null));
+  const nrBand = isOffline ? null : (cell.nrBand || (cell.primaryBand && cell.primaryBand.startsWith("n") ? cell.primaryBand.split(" ")[0] : null));
+  const caCombo = isOffline ? "--" : ([lteBand, nrBand].filter(Boolean).join("+") || "--");
+  const carrierPlmn = isOffline ? "--" : `${cell.operator || "--"}${cell.plmn && cell.plmn !== "—" ? ` ${cell.plmn}` : ""}`;
+
+  const ltePci = !isOffline && cell.ltePci !== null && cell.ltePci !== undefined ? cell.ltePci : "--";
+  const lteRsrp = !isOffline && cell.lteRsrp !== null && cell.lteRsrp !== undefined ? `${cell.lteRsrp}` : "--";
+  const lteSinr = !isOffline && cell.lteSinr !== null && cell.lteSinr !== undefined ? `${cell.lteSinr}` : "--";
+
+  const nrPci = !isOffline && cell.nrPci !== null && cell.nrPci !== undefined ? cell.nrPci : "--";
+  const nrRsrpVal = !isOffline && typeof cell.nrRsrp === "number" ? cell.nrRsrp : null;
+  const nrSinrVal = !isOffline && typeof cell.nrSinr === "number" ? cell.nrSinr : null;
+  const nrRsrp = nrRsrpVal !== null ? `${nrRsrpVal}` : "--";
+  const nrSinr = nrSinrVal !== null ? `${nrSinrVal}` : "--";
+  const nrWeakWarn = !isOffline && ((nrSinrVal !== null && nrSinrVal < 0) || (nrRsrpVal !== null && nrRsrpVal < -112));
+
+  const tp = state.throughput;
+  const downTxt = isOffline ? "--" : tp.downMbps.toFixed(1);
+  const upTxt = isOffline ? "--" : tp.upMbps.toFixed(1);
+  const pingTxt = (!isOffline && state.router.pingMs !== null && state.router.pingMs !== undefined) ? `${state.router.pingMs}` : "--";
+
+  return `
+    <div class="rf-dual-panel ${isOffline ? "is-offline" : ""}" aria-label="Dual-Band RF and Live WAN Telemetry">
+      <div class="rf-dual-head">
+        <span class="rf-dual-rat">
+          <span class="rf-status-dot ${isOffline ? "bad" : "ok"}"></span>
+          <strong>${escapeHtml(ratLabel)}</strong>
+        </span>
+        <span class="rf-dual-carrier">${escapeHtml(carrierPlmn)}</span>
+        <span class="rf-dual-combo mono">${escapeHtml(caCombo)}</span>
+        <span class="rf-status-dot ${isOffline ? "bad" : "ok"}" title="${isOffline ? "Router Offline" : "Link Active"}"></span>
+      </div>
+
+      <div class="rf-dual-row tabular">
+        ${renderMiniSignalBars(cell.lteRsrp, cell.lteSinr, isOffline)}
+        <span class="rf-band-tag lte">LTE ${escapeHtml(lteBand || "--")}</span>
+        <span class="rf-kv"><em>PCI</em> ${escapeHtml(ltePci)}</span>
+        <span class="rf-kv"><em>RSRP</em> ${escapeHtml(lteRsrp)}</span>
+        <span class="rf-kv"><em>SINR</em> ${escapeHtml(lteSinr)}</span>
+      </div>
+
+      <div class="rf-dual-row tabular">
+        ${renderMiniSignalBars(cell.nrRsrp, cell.nrSinr, isOffline)}
+        <span class="rf-band-tag nr">NR ${escapeHtml(nrBand || "--")}</span>
+        <span class="rf-kv"><em>PCI</em> ${escapeHtml(nrPci)}</span>
+        <span class="rf-kv"><em>RSRP</em> ${escapeHtml(nrRsrp)}</span>
+        <span class="rf-kv"><em>SINR</em> ${escapeHtml(nrSinr)}</span>
+        ${nrWeakWarn ? `<span class="rf-warn-chip" title="Weak 5G NR signal (RSRP &lt; -112 dBm or SINR &lt; 0 dB)">⚠️</span>` : ""}
+      </div>
+
+      <div class="rf-dual-foot tabular">
+        <span class="rf-foot-tp">↓ <strong>${downTxt}</strong> ↑ <strong>${upTxt}</strong> Mbps</span>
+        <span class="rf-foot-ping">↻ <strong>${pingTxt}</strong> ms</span>
+        <span class="rf-foot-ok ${isOffline ? "bad" : "ok"}">● ${isOffline ? "Offline" : "OK"}</span>
+      </div>
+    </div>
+  `;
+}
+
 function renderSignalRingSvg(cell) {
   const isOffline = Boolean(state.routerOffline && state.dataSource === "live");
   const tier = computeSignalStep(cell);
@@ -597,6 +685,8 @@ function renderSignalRingSvg(cell) {
         <span>·</span>
         <span>RSRQ: <strong>${rsrqText}</strong></span>
       </div>
+
+      ${renderDualBandRfPanel(cell, isOffline)}
 
       <div style="display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; width:100%; gap:6px;">
         <div class="qual-badge ${tier.cls} whitespace-nowrap shrink-0">
@@ -2583,6 +2673,10 @@ function applyLiveTelemetry(tm, cl, st, mg, wg, bl, lg) {
         state.cellular.sinr = lte.sinr;
       }
       state.cellular.pci = nr.pci || lte.pci || "—";
+      state.cellular.lteBand = lte.band ? `B${lte.band}` : null;
+      state.cellular.ltePci = lte.pci !== undefined && lte.pci !== null ? lte.pci : null;
+      state.cellular.nrBand = nr.band ? `n${nr.band}` : null;
+      state.cellular.nrPci = nr.pci !== undefined && nr.pci !== null ? nr.pci : null;
       state.cellular.cellId = lte.cid ? `0x${Number(lte.cid).toString(16).toUpperCase()}` : "—";
       state.cellular.ta = typeof nr.ta === "number" ? nr.ta : null;
       state.cellular.primaryBand = nr.band ? `n${nr.band}${nr.bw ? ` (${nr.bw})` : ""}` : (lte.band ? `B${lte.band}` : "—");
