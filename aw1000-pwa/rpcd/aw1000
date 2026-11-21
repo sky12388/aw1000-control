@@ -600,7 +600,7 @@ LUA
 						;;
 					4g)
 						$MODEM_STATUS --run_atcmd 'AT+E5GOPT=1' >/dev/null 2>&1
-						$MODEM_STATUS --run_atcmd 'AT+GTACT=2,3' >/dev/null 2>&1
+						$MODEM_STATUS --run_atcmd 'AT+GTACT=2' >/dev/null 2>&1
 						;;
 					5g-nsa)
 						$MODEM_STATUS --run_atcmd 'AT+E5GOPT=5' >/dev/null 2>&1
