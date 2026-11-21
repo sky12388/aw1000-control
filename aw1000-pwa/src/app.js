@@ -1159,22 +1159,25 @@ function maskIdentityValue(val) {
 }
 
 function parseGtactBands(gtactStr) {
-  const lte = [];
-  const nr = [];
-  if (!gtactStr) return { lte, nr };
+  const lteSet = new Set();
+  const nrSet = new Set();
+  if (!gtactStr) return { lte: [], nr: [] };
   const parts = String(gtactStr).split(",").slice(3);
   for (const raw of parts) {
     const n = Number(raw.trim());
     if (!Number.isFinite(n) || n <= 0) continue;
     if (n >= 101 && n < 200) {
-      lte.push(n - 100);
+      lteSet.add(n - 100);
     } else if (n >= 501 && n < 600) {
-      nr.push(n - 500);
+      nrSet.add(n - 500);
     } else if (n >= 5001 && n < 6000) {
-      nr.push(n - 5000);
+      nrSet.add(n - 5000);
     }
   }
-  return { lte, nr };
+  return {
+    lte: Array.from(lteSet).sort((a, b) => a - b),
+    nr: Array.from(nrSet).sort((a, b) => a - b)
+  };
 }
 
 function startIdentityReveal10s() {
@@ -1353,7 +1356,13 @@ function renderCellularScreen() {
         </div>
 
         <div class="band-lock-group">
-          <span class="rf-stat-label">LTE Bands (4G Anchor &amp; CA)</span>
+          <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+            <span class="rf-stat-label">LTE Bands (4G Anchor &amp; CA)</span>
+            <span class="band-legend">
+              <span><span class="band-legend-dot on"></span>Green = Checked</span>
+              <span><span class="band-legend-dot off"></span>Red = Unchecked</span>
+            </span>
+          </div>
           <div class="band-pill-grid">
             ${LTE_BAND_OPTIONS.map((b) => `
               <button type="button" class="band-pill lte ${selLte.includes(b) ? "active" : ""}"
@@ -2692,13 +2701,24 @@ function setupEvents() {
         onConfirm: async () => {
           if (state.dataSource === "live") {
             const [res] = await ubusBatchCall([{ object: "aw1000", method: "modem_mode", args: { mode } }]);
-            if (res?.data && res.data.ok === false) {
-              pushToast(`Mode switch failed: ${res.data.error || "Unknown error"}`);
+            if (!res || res.error || (res.data && res.data.ok === false)) {
+              pushToast(`Mode switch failed: ${res?.data?.error || res?.error || "Access denied or AT error"}`);
               return;
+            }
+            if (res.data?.gtact) {
+              state.cellular.gtactRaw = res.data.gtact;
+              const parsed = parseGtactBands(res.data.gtact);
+              if (parsed.lte.length > 0 || parsed.nr.length > 0) {
+                state.cellular.selectedLteBands = parsed.lte;
+                state.cellular.selectedNrBands = parsed.nr;
+              }
             }
           }
           state.cellular.ratMode = mode;
+          state.cellular.modeSwitchPendingUntil = Date.now() + 8000;
+          state.cellular.bandSelectionDirty = false;
           pushToast(`Network mode set to ${labels[mode] || mode}. Cycling radio…`);
+          render();
           setTimeout(() => pollTick(true), 6000);
         }
       };
@@ -2733,18 +2753,28 @@ function setupEvents() {
       const arg = parts.join(";");
       state.confirmModal = {
         title: `Apply Band Lock (${arg})?`,
-        impact: `Applies AT+GTACT band selection via modem_status --set_bandlock and saves to UCI. Cellular WAN will re-register for ~10–20 seconds.`,
+        impact: `Applies exact AT+GTACT band selection directly to the FG360 modem and saves to UCI. Selected green bands stay locked.`,
         lifelineNote: "Use 'Clear All Locks' anytime to restore all factory LTE + 5G bands.",
         onConfirm: async () => {
           if (state.dataSource === "live") {
             const [res] = await ubusBatchCall([{ object: "aw1000", method: "band_lock", args: { arg } }]);
-            if (res?.data && res.data.ok === false) {
-              pushToast(`Band lock failed: ${res.data.error || "Unknown error"}`);
+            if (!res || res.error || (res.data && res.data.ok === false)) {
+              pushToast(`Band lock failed: ${res?.data?.error || res?.error || "Access denied or AT error"}`);
               return;
+            }
+            if (res.data?.gtact) {
+              state.cellular.gtactRaw = res.data.gtact;
+              const parsed = parseGtactBands(res.data.gtact);
+              if (parsed.lte.length > 0 || parsed.nr.length > 0) {
+                state.cellular.selectedLteBands = parsed.lte;
+                state.cellular.selectedNrBands = parsed.nr;
+              }
             }
           }
           state.cellular.bandSelectionDirty = false;
+          state.cellular.bandLockPendingUntil = Date.now() + 8000;
           pushToast(`Band lock applied (${arg}).`);
+          render();
           setTimeout(() => pollTick(true), 5000);
         }
       };
@@ -3248,13 +3278,19 @@ function applyLiveTelemetry(tm, cl, st, mg, wg, bl, lg) {
   }
 
   if (mg && typeof mg === "object") {
-    if (mg.mode) state.cellular.ratMode = mg.mode;
+    const nowTs = Date.now();
+    if (mg.mode && !(state.cellular.modeSwitchPendingUntil && nowTs < state.cellular.modeSwitchPendingUntil)) {
+      state.cellular.ratMode = mg.mode;
+    }
     if (mg.gtact) {
       state.cellular.gtactRaw = mg.gtact;
-      if (!state.cellular.bandSelectionDirty) {
+      const bandPending = state.cellular.bandLockPendingUntil && nowTs < state.cellular.bandLockPendingUntil;
+      if (!state.cellular.bandSelectionDirty && !bandPending) {
         const parsed = parseGtactBands(mg.gtact);
-        if (parsed.lte.length > 0) state.cellular.selectedLteBands = parsed.lte;
-        if (parsed.nr.length > 0) state.cellular.selectedNrBands = parsed.nr;
+        if (parsed.lte.length > 0 || parsed.nr.length > 0) {
+          state.cellular.selectedLteBands = parsed.lte;
+          state.cellular.selectedNrBands = parsed.nr;
+        }
       }
     }
     if (mg.gtcelllock !== undefined) {

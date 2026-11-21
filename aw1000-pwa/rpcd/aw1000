@@ -593,28 +593,38 @@ LUA
 				read -r input
 				json_load "$input" 2>/dev/null
 				json_get_var mode mode
+				e5_out=""
+				gt_out=""
 				case "$mode" in
 					auto)
-						$MODEM_STATUS --run_atcmd 'AT+E5GOPT=7' >/dev/null 2>&1
-						$MODEM_STATUS --run_atcmd 'AT+GTACT=20,6,3' >/dev/null 2>&1
+						e5_out=$($MODEM_STATUS --run_atcmd 'AT+E5GOPT=7' 2>&1)
+						gt_out=$($MODEM_STATUS --run_atcmd 'AT+GTACT=20,6,3' 2>&1)
 						;;
 					4g)
-						$MODEM_STATUS --run_atcmd 'AT+E5GOPT=1' >/dev/null 2>&1
-						$MODEM_STATUS --run_atcmd 'AT+GTACT=2' >/dev/null 2>&1
+						e5_out=$($MODEM_STATUS --run_atcmd 'AT+E5GOPT=1' 2>&1)
+						gt_out=$($MODEM_STATUS --run_atcmd 'AT+GTACT=2' 2>&1)
 						;;
 					5g-nsa)
-						$MODEM_STATUS --run_atcmd 'AT+E5GOPT=5' >/dev/null 2>&1
-						$MODEM_STATUS --run_atcmd 'AT+GTACT=17,6,' >/dev/null 2>&1
+						e5_out=$($MODEM_STATUS --run_atcmd 'AT+E5GOPT=5' 2>&1)
+						gt_out=$($MODEM_STATUS --run_atcmd 'AT+GTACT=17,6' 2>&1)
 						;;
 					5g-sa)
-						$MODEM_STATUS --run_atcmd 'AT+E5GOPT=3' >/dev/null 2>&1
-						$MODEM_STATUS --run_atcmd 'AT+GTACT=14,6' >/dev/null 2>&1
+						e5_out=$($MODEM_STATUS --run_atcmd 'AT+E5GOPT=3' 2>&1)
+						gt_out=$($MODEM_STATUS --run_atcmd 'AT+GTACT=14' 2>&1)
 						;;
 					*)
 						echo '{"ok":false,"error":"Invalid mode (use auto|4g|5g-nsa|5g-sa)"}'
 						exit 0
 						;;
 				esac
+				if printf '%s\n%s' "$e5_out" "$gt_out" | grep -q 'ERROR'; then
+					json_init
+					json_add_boolean "ok" 0
+					json_add_string "error" "Modem rejected AT+GTACT/AT+E5GOPT for mode $mode"
+					json_dump
+					exit 0
+				fi
+				cur_gt=$($MODEM_STATUS --run_atcmd 'AT+GTACT?' 2>/dev/null | tr -d '\r' | sed -n 's/^+GTACT:[[:space:]]*//p' | head -1)
 				(
 					$MODEM_STATUS --run_atcmd 'AT+CFUN=4' >/dev/null 2>&1
 					sleep 2
@@ -623,6 +633,7 @@ LUA
 				json_init
 				json_add_boolean "ok" 1
 				json_add_string "mode" "$mode"
+				[ -n "$cur_gt" ] && json_add_string "gtact" "$cur_gt"
 				json_dump
 				;;
 
@@ -642,11 +653,71 @@ LUA
 							;;
 					esac
 				fi
-				if [ -x "$CTL" ]; then
-					"$CTL" band-lock "$arg"
+				if [ "$arg" = "all" ]; then
+					$MODEM_STATUS --run_atcmd 'AT+E5GOPT=7' >/dev/null 2>&1
+					gt_out=$($MODEM_STATUS --run_atcmd 'AT+GTACT=20,6,3' 2>&1)
+					uci -q delete "3ginfo.@3ginfo[0].bandlock"
+					uci -q commit 3ginfo
 				else
-					echo '{"ok":false,"error":"aw1000-ctl not found"}'
+					lte_codes=""
+					nr_codes=""
+					OLDIFS="$IFS"
+					IFS=';'
+					for seg in $arg; do
+						rat="${seg%%,*}"
+						blist="${seg#*,}"
+						IFS='/'
+						for b in $blist; do
+							case "$b" in ''|*[!0-9]*) continue ;; esac
+							if [ "$rat" = "4" ]; then
+								code=$((100 + b))
+								lte_codes="${lte_codes:+${lte_codes},}${code}"
+							elif [ "$rat" = "5" ]; then
+								if [ "$b" -lt 10 ]; then
+									code=$((500 + b))
+								else
+									code=$((5000 + b))
+								fi
+								nr_codes="${nr_codes:+${nr_codes},}${code}"
+							fi
+						done
+						IFS=';'
+					done
+					IFS="$OLDIFS"
+
+					if [ -z "$lte_codes" ] && [ -z "$nr_codes" ]; then
+						echo '{"ok":false,"error":"No valid LTE or 5G NR bands specified"}'
+						exit 0
+					fi
+
+					if [ -n "$lte_codes" ] && [ -n "$nr_codes" ]; then
+						$MODEM_STATUS --run_atcmd 'AT+E5GOPT=7' >/dev/null 2>&1
+						gt_cmd="AT+GTACT=17,6,,${lte_codes},${nr_codes}"
+					elif [ -n "$lte_codes" ]; then
+						$MODEM_STATUS --run_atcmd 'AT+E5GOPT=1' >/dev/null 2>&1
+						gt_cmd="AT+GTACT=2,,,${lte_codes}"
+					else
+						$MODEM_STATUS --run_atcmd 'AT+E5GOPT=3' >/dev/null 2>&1
+						gt_cmd="AT+GTACT=14,,,${nr_codes}"
+					fi
+
+					gt_out=$($MODEM_STATUS --run_atcmd "$gt_cmd" 2>&1)
+					if printf '%s' "$gt_out" | grep -q 'ERROR'; then
+						json_init
+						json_add_boolean "ok" 0
+						json_add_string "error" "Modem rejected $gt_cmd"
+						json_dump
+						exit 0
+					fi
+					uci -q set "3ginfo.@3ginfo[0].bandlock=$arg"
+					uci -q commit 3ginfo
 				fi
+				cur_gt=$($MODEM_STATUS --run_atcmd 'AT+GTACT?' 2>/dev/null | tr -d '\r' | sed -n 's/^+GTACT:[[:space:]]*//p' | head -1)
+				json_init
+				json_add_boolean "ok" 1
+				json_add_string "bandlock" "$arg"
+				[ -n "$cur_gt" ] && json_add_string "gtact" "$cur_gt"
+				json_dump
 				;;
 
 			cell_lock)
