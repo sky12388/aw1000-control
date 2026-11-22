@@ -76,6 +76,8 @@ case "$1" in
 		json_close_object
 		json_add_object "logs_get"
 		json_close_object
+		json_add_object "led_get"
+		json_close_object
 		json_add_object "wifi_set"
 			json_add_string "radio" "ra0|rai0"
 			json_add_string "ssid" "string"
@@ -123,6 +125,9 @@ case "$1" in
 		json_close_object
 		json_add_object "backup_create"
 			json_add_string "tag" "manual"
+		json_close_object
+		json_add_object "led_set"
+			json_add_string "mode" "stock|off|knight|dance|traffic"
 		json_close_object
 		json_dump
 		;;
@@ -917,6 +922,32 @@ LUA
 				sz="$(du -sk "$out" | awk '{print $1}')"
 				printf '{"ok":true,"path":"%s","name":"%s","size_kb":%s,"sha256":"%s"}\n' \
 					"$out" "${out#$M/}" "${sz:-0}" "$sha"
+				;;
+
+			led_get)
+				if [ -x /usr/bin/aw1000-led-fx ]; then
+					/usr/bin/aw1000-led-fx get
+				else
+					echo '{"ok":true,"mode":"stock","enabled":true,"last_mode":"stock"}'
+				fi
+				;;
+
+			led_set)
+				read -r input
+				json_load "$input" 2>/dev/null
+				json_get_var mode mode
+				case "$mode" in
+					stock|off|knight|dance|traffic) ;;
+					*)
+						echo '{"ok":false,"error":"Invalid LED mode (use stock|off|knight|dance|traffic)"}'
+						exit 0
+						;;
+				esac
+				if [ -x /usr/bin/aw1000-led-fx ]; then
+					/usr/bin/aw1000-led-fx set "$mode"
+				else
+					echo '{"ok":false,"error":"/usr/bin/aw1000-led-fx not installed"}'
+				fi
 				;;
 		esac
 		;;

@@ -1,0 +1,248 @@
+#!/bin/sh
+# ==============================================================================
+# AW1000 Front-Panel LED FX Controller (stock | off | knight | dance | traffic)
+# Safe: only touches /sys/class/leds/* and /etc/init.d/led_ctrld.init.
+# Never touches SSH, NetBird, Tailscale, firewall, or modem.
+# ==============================================================================
+
+PID_FILE="/tmp/aw1000-led-fx.pid"
+MODE_FILE="/tmp/aw1000-led-fx.mode"
+LAST_ON_FILE="/tmp/aw1000-led-fx.last"
+
+ALL_LEDS="status:green status:red internet:single 5g:signal signal:green signal:red wifi:green wifi:red phone:green phone:red"
+
+stop_fx_loop() {
+	if [ -f "$PID_FILE" ]; then
+		pid="$(cat "$PID_FILE" 2>/dev/null)"
+		if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+			kill "$pid" 2>/dev/null || true
+		fi
+		rm -f "$PID_FILE"
+	fi
+}
+
+clear_all_leds() {
+	for l in $ALL_LEDS; do
+		[ -w "/sys/class/leds/$l/trigger" ] && echo "none" > "/sys/class/leds/$l/trigger" 2>/dev/null || true
+		[ -w "/sys/class/leds/$l/brightness" ] && echo "0" > "/sys/class/leds/$l/brightness" 2>/dev/null || true
+	done
+}
+
+stop_stock_daemon() {
+	LED_TOGGLE_RESTART=1 /etc/init.d/led_ctrld.init stop >/dev/null 2>&1 || true
+}
+
+start_stock_daemon() {
+	/etc/init.d/led_ctrld.init start >/dev/null 2>&1 || true
+}
+
+run_lua_fx() {
+	fx_mode="$1"
+	lua - "$fx_mode" "$PID_FILE" <<'LUA' </dev/null >/dev/null 2>&1 &
+local mode = arg[1] or "knight"
+local pid_file = arg[2]
+local ok_nixio, nixio = pcall(require, "nixio")
+
+local function msleep(ms)
+	if ok_nixio and nixio.nanosleep then
+		nixio.nanosleep(math.floor(ms / 1000), (ms % 1000) * 1000000)
+	else
+		os.execute("sleep 1")
+	end
+end
+
+local function set_led(name, val)
+	local f = io.open("/sys/class/leds/" .. name .. "/brightness", "w")
+	if f then
+		f:write(val and "255" or "0")
+		f:close()
+	end
+end
+
+-- 6 front-panel slots top-to-bottom (g = green/primary, r = red)
+local slots = {
+	{ g = "status:green",    r = "status:red" },
+	{ g = "internet:single", r = nil },
+	{ g = "5g:signal",       r = nil },
+	{ g = "signal:green",    r = "signal:red" },
+	{ g = "wifi:green",      r = "wifi:red" },
+	{ g = "phone:green",     r = "phone:red" },
+}
+
+local function set_slot(idx, color)
+	local s = slots[idx]
+	if not s then return end
+	if color == "off" then
+		set_led(s.g, false)
+		if s.r then set_led(s.r, false) end
+	elseif color == "green" then
+		set_led(s.g, true)
+		if s.r then set_led(s.r, false) end
+	elseif color == "red" then
+		if s.r then
+			set_led(s.g, false)
+			set_led(s.r, true)
+		else
+			set_led(s.g, true)
+		end
+	elseif color == "amber" then
+		set_led(s.g, true)
+		if s.r then set_led(s.r, true) end
+	end
+end
+
+local function all_off()
+	for i = 1, #slots do set_slot(i, "off") end
+end
+
+local function read_bytes(iface)
+	local rx, tx = 0, 0
+	local f1 = io.open("/sys/class/net/" .. iface .. "/statistics/rx_bytes", "r")
+	if f1 then rx = tonumber(f1:read("*a")) or 0; f1:close() end
+	local f2 = io.open("/sys/class/net/" .. iface .. "/statistics/tx_bytes", "r")
+	if f2 then tx = tonumber(f2:read("*a")) or 0; f2:close() end
+	return rx + tx
+end
+
+local function find_wan_iface()
+	for _, ifc in ipairs({ "ccmni2", "ccmni1", "ccmni0", "eth0" }) do
+		local f = io.open("/sys/class/net/" .. ifc .. "/statistics/rx_bytes", "r")
+		if f then f:close(); return ifc end
+	end
+	return "ccmni2"
+end
+
+if mode == "knight" then
+	local colors = { "green", "amber", "red" }
+	local cidx = 1
+	local seq = { 1, 2, 3, 4, 5, 6, 5, 4, 3, 2 }
+	while true do
+		local col = colors[cidx]
+		for _, pos in ipairs(seq) do
+			all_off()
+			set_slot(pos, col)
+			msleep(120)
+		end
+		cidx = (cidx % #colors) + 1
+	end
+elseif mode == "dance" then
+	local step = 0
+	local palette = { "green", "amber", "red", "green", "red", "amber" }
+	while true do
+		step = step + 1
+		local pat = step % 4
+		if pat == 0 then
+			for i = 1, #slots do
+				set_slot(i, (i % 2 == 0) and "green" or "red")
+			end
+		elseif pat == 1 then
+			for i = 1, #slots do
+				set_slot(i, (i % 2 == 1) and "amber" or "off")
+			end
+		elseif pat == 2 then
+			for i = 1, #slots do
+				set_slot(i, (i % 2 == 0) and "red" or "green")
+			end
+		else
+			for i = 1, #slots do
+				set_slot(i, palette[((i + step) % #palette) + 1])
+			end
+		end
+		msleep(220)
+	end
+elseif mode == "traffic" then
+	local ifc = find_wan_iface()
+	local prev = read_bytes(ifc)
+	while true do
+		msleep(350)
+		local cur = read_bytes(ifc)
+		local delta = cur - prev
+		if delta < 0 then delta = 0 end
+		prev = cur
+		-- Convert bytes per 0.35s into approx KB/s
+		local kbps = (delta / 1024.0) / 0.35
+		local level = 1
+		if kbps >= 5000 then level = 6
+		elseif kbps >= 1500 then level = 5
+		elseif kbps >= 400 then level = 4
+		elseif kbps >= 80 then level = 3
+		elseif kbps >= 10 then level = 2
+		else level = 1 end
+		for i = 1, #slots do
+			if i <= level then
+				if i <= 3 then set_slot(i, "green")
+				elseif i <= 5 then set_slot(i, "amber")
+				else set_slot(i, "red") end
+			else
+				set_slot(i, "off")
+			end
+		end
+	end
+end
+LUA
+	echo "$!" > "$PID_FILE"
+}
+
+get_state() {
+	mode="stock"
+	[ -f "$MODE_FILE" ] && mode="$(cat "$MODE_FILE" 2>/dev/null)"
+	case "$mode" in
+		stock|off|knight|dance|traffic) ;;
+		*) mode="stock" ;;
+	esac
+	# If an animation mode was saved but loop died, report stock
+	if [ "$mode" = "knight" ] || [ "$mode" = "dance" ] || [ "$mode" = "traffic" ]; then
+		pid="$(cat "$PID_FILE" 2>/dev/null)"
+		if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
+			mode="stock"
+		fi
+	fi
+	last_on="stock"
+	[ -f "$LAST_ON_FILE" ] && last_on="$(cat "$LAST_ON_FILE" 2>/dev/null)"
+	[ "$mode" = "off" ] && enabled="false" || enabled="true"
+	printf '{"ok":true,"mode":"%s","enabled":%s,"last_mode":"%s"}\n' "$mode" "$enabled" "$last_on"
+}
+
+cmd="${1:-get}"
+case "$cmd" in
+	get)
+		get_state
+		;;
+	set)
+		mode="${2:-stock}"
+		case "$mode" in
+			stock)
+				stop_fx_loop
+				clear_all_leds
+				start_stock_daemon
+				echo "stock" > "$MODE_FILE"
+				echo "stock" > "$LAST_ON_FILE"
+				get_state
+				;;
+			off)
+				stop_fx_loop
+				stop_stock_daemon
+				clear_all_leds
+				echo "off" > "$MODE_FILE"
+				get_state
+				;;
+			knight|dance|traffic)
+				stop_fx_loop
+				stop_stock_daemon
+				clear_all_leds
+				echo "$mode" > "$MODE_FILE"
+				echo "$mode" > "$LAST_ON_FILE"
+				run_lua_fx "$mode"
+				get_state
+				;;
+			*)
+				echo '{"ok":false,"error":"Invalid LED mode (use stock|off|knight|dance|traffic)"}'
+				exit 0
+				;;
+		esac
+		;;
+	*)
+		echo '{"ok":false,"error":"Usage: aw1000-led-fx get | set <stock|off|knight|dance|traffic>"}'
+		exit 0
+		;;
+esac

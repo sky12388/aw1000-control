@@ -1715,6 +1715,40 @@ function renderSystemScreen() {
         `}
       </article>
 
+      <!-- Front-Panel LED Control (ON/OFF + FX Modes) -->
+      <article class="card">
+        <div class="card-accent-bar wifi"></div>
+        <div class="card-header flex-wrap gap-2">
+          <div class="card-title-wrap min-w-0">
+            <div class="card-icon wifi">${ICONS.signal5g}</div>
+            <div class="card-title-text min-w-0">
+              <h2 class="card-title">Front-Panel LED Control</h2>
+              <p class="card-subtitle">Toggle lights ON/OFF or pick Green / Amber / Red FX</p>
+            </div>
+          </div>
+          <button class="btn ${(state.led?.mode || "stock") === "off" ? "btn-danger-signal" : "btn-primary-wifi"}"
+            style="min-height:36px; padding:6px 14px; font-size:0.82rem;"
+            data-action="toggle-led-power" ${disabled}>
+            ${(state.led?.mode || "stock") === "off" ? "LEDs: OFF (Tap to Turn ON)" : "LEDs: ON (Tap to Turn OFF)"}
+          </button>
+        </div>
+
+        <div class="preset-row">
+          ${[
+            { id: "stock", label: "Stock Status" },
+            { id: "knight", label: "Running Chase" },
+            { id: "dance", label: "Dancing Wave" },
+            { id: "traffic", label: "5G VU-Meter" },
+            { id: "off", label: "Lights Off" }
+          ].map((m) => `
+            <button class="preset-pill ${(state.led?.mode || "stock") === m.id ? "active" : ""}"
+              data-action="set-led-mode" data-led-mode="${m.id}" ${disabled}>
+              ${escapeHtml(m.label)}
+            </button>
+          `).join("")}
+        </div>
+      </article>
+
       <!-- Hardened Services & Router Power Controls -->
       <article class="card">
         <div class="card-accent-bar net"></div>
@@ -2943,6 +2977,30 @@ function setupEvents() {
         }
       };
       render();
+    } else if (action === "toggle-led-power" || action === "set-led-mode") {
+      if (!state.editMode) return;
+      const curMode = state.led?.mode || "stock";
+      const lastMode = (state.led?.lastMode && state.led.lastMode !== "off") ? state.led.lastMode : "stock";
+      const targetMode = action === "toggle-led-power"
+        ? (curMode === "off" ? lastMode : "off")
+        : (actionEl.getAttribute("data-led-mode") || "stock");
+      if (state.dataSource === "live") {
+        const [res] = await ubusBatchCall([{ object: "aw1000", method: "led_set", args: { mode: targetMode } }]);
+        if (!res || res.error || (res.data && res.data.ok === false)) {
+          pushToast(`LED switch failed: ${res?.data?.error || res?.error || "Access denied"}`);
+          return;
+        }
+        state.led = {
+          mode: res.data?.mode || targetMode,
+          enabled: res.data?.enabled !== false,
+          lastMode: res.data?.last_mode || (targetMode === "off" ? lastMode : targetMode)
+        };
+      } else {
+        state.led = { mode: targetMode, enabled: targetMode !== "off", lastMode: targetMode === "off" ? lastMode : targetMode };
+      }
+      const ledLabels = { stock: "Stock Status", off: "Lights Off", knight: "Running Chase", dance: "Dancing Wave", traffic: "5G VU-Meter" };
+      pushToast(`Front LEDs set to: ${ledLabels[targetMode] || targetMode}`);
+      render();
     } else if (action === "reboot-router") {
       if (!state.editMode) return;
       state.confirmModal = {
@@ -3398,9 +3456,17 @@ async function refreshTabSpecificLive(tab) {
     } else if (tab === "system") {
       const res = await ubusBatchCall([
         { object: "aw1000", method: "backup_list" },
-        { object: "aw1000", method: "logs_get" }
+        { object: "aw1000", method: "logs_get" },
+        { object: "aw1000", method: "led_get" }
       ]);
       applyLiveTelemetry(null, null, null, null, null, res?.[0]?.data, res?.[1]?.data);
+      if (res?.[2]?.data && res[2].data.ok) {
+        state.led = {
+          mode: res[2].data.mode || "stock",
+          enabled: res[2].data.enabled !== false,
+          lastMode: res[2].data.last_mode || "stock"
+        };
+      }
       render();
     }
   } catch (err) {
