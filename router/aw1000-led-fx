@@ -29,11 +29,17 @@ clear_all_leds() {
 }
 
 stop_stock_daemon() {
-	LED_TOGGLE_RESTART=1 /etc/init.d/led_ctrld.init stop >/dev/null 2>&1 || true
+	uci -q set led_ctrld.default_setting=setting || true
+	uci -q set led_ctrld.default_setting.lights_enabled=0 || true
+	uci -q commit led_ctrld || true
+	LED_TOGGLE_RESTART=1 /etc/init.d/led_ctrld.init restart >/dev/null 2>&1 || true
 }
 
 start_stock_daemon() {
-	/etc/init.d/led_ctrld.init start >/dev/null 2>&1 || true
+	uci -q set led_ctrld.default_setting=setting || true
+	uci -q set led_ctrld.default_setting.lights_enabled=1 || true
+	uci -q commit led_ctrld || true
+	LED_TOGGLE_RESTART=1 /etc/init.d/led_ctrld.init restart >/dev/null 2>&1 || true
 }
 
 run_lua_fx() {
