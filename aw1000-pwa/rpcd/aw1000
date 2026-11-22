@@ -653,9 +653,36 @@ LUA
 							;;
 					esac
 				fi
+
+				verify_gtact_codes() {
+					_cur="$1"; _lte="$2"; _nr="$3"
+					for _code in $(echo "$_lte" | tr ',' ' '); do
+						[ -z "$_code" ] && continue
+						echo ",$_cur," | grep -q ",$_code," || return 1
+					done
+					for _code in $(echo "$_nr" | tr ',' ' '); do
+						[ -z "$_code" ] && continue
+						echo ",$_cur," | grep -q ",$_code," || return 1
+					done
+					return 0
+				}
+
 				if [ "$arg" = "all" ]; then
 					$MODEM_STATUS --run_atcmd 'AT+E5GOPT=7' >/dev/null 2>&1
 					gt_out=$($MODEM_STATUS --run_atcmd 'AT+GTACT=20,6,3' 2>&1)
+					if printf '%s' "$gt_out" | grep -qi 'ERROR'; then
+						json_init; json_add_boolean "ok" 0
+						json_add_string "error" "Modem rejected AT+GTACT=20,6,3"
+						json_add_string "at_raw" "$(printf '%s' "$gt_out" | tr '\r\n' ' ' | sed 's/  */ /g')"
+						json_dump; exit 0
+					fi
+					cur_gt=$($MODEM_STATUS --run_atcmd 'AT+GTACT?' 2>/dev/null | tr -d '\r' | sed -n 's/^+GTACT:[[:space:]]*//p' | head -1)
+					case "$cur_gt" in 20,6,3*|20,*) ;;
+						*) json_init; json_add_boolean "ok" 0
+						   json_add_string "error" "Band unlock not confirmed by AT+GTACT?"
+						   [ -n "$cur_gt" ] && json_add_string "gtact" "$cur_gt"
+						   json_dump; exit 0 ;;
+					esac
 					uci -q delete "3ginfo.@3ginfo[0].bandlock"
 					uci -q commit 3ginfo
 				else
@@ -690,22 +717,37 @@ LUA
 						exit 0
 					fi
 
+					# FG360-EAU-11 (fw 81107.7000.00.08.01.27) flat AT+GTACT format, verified:
+					# AT+GTACT=17,6,,101,103,107,128,5078 -> OK; GTACT? echoes exact lock.
+					# Padded 9-group comma forms returned ERROR on this firmware.
 					if [ -n "$lte_codes" ] && [ -n "$nr_codes" ]; then
 						$MODEM_STATUS --run_atcmd 'AT+E5GOPT=7' >/dev/null 2>&1
 						gt_cmd="AT+GTACT=17,6,,${lte_codes},${nr_codes}"
 					elif [ -n "$lte_codes" ]; then
 						$MODEM_STATUS --run_atcmd 'AT+E5GOPT=1' >/dev/null 2>&1
-						gt_cmd="AT+GTACT=2,,,${lte_codes}"
+						gt_cmd="AT+GTACT=2,,${lte_codes}"
 					else
 						$MODEM_STATUS --run_atcmd 'AT+E5GOPT=3' >/dev/null 2>&1
 						gt_cmd="AT+GTACT=14,,,${nr_codes}"
 					fi
 
 					gt_out=$($MODEM_STATUS --run_atcmd "$gt_cmd" 2>&1)
-					if printf '%s' "$gt_out" | grep -q 'ERROR'; then
+					if printf '%s' "$gt_out" | grep -qi 'ERROR'; then
 						json_init
 						json_add_boolean "ok" 0
 						json_add_string "error" "Modem rejected $gt_cmd"
+						json_add_string "at_raw" "$(printf '%s' "$gt_out" | tr '\r\n' ' ' | sed 's/  */ /g')"
+						json_dump
+						exit 0
+					fi
+
+					cur_gt=$($MODEM_STATUS --run_atcmd 'AT+GTACT?' 2>/dev/null | tr -d '\r' | sed -n 's/^+GTACT:[[:space:]]*//p' | head -1)
+					if ! verify_gtact_codes "$cur_gt" "$lte_codes" "$nr_codes"; then
+						json_init
+						json_add_boolean "ok" 0
+						json_add_string "error" "AT+GTACT? readback did not confirm requested band lock"
+						json_add_string "requested" "$gt_cmd"
+						[ -n "$cur_gt" ] && json_add_string "gtact" "$cur_gt"
 						json_dump
 						exit 0
 					fi

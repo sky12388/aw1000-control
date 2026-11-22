@@ -16,3 +16,19 @@ Lightweight, RGB-accented **OpenWrt Progressive Web App (`/www/app/`)** and **64
 - **Read-Only by Default:** All write controls remain disabled until the user unlocks **Edit Mode** (authenticated via `rpcd session.login`) and confirms via an **Impact Confirmation Sheet**.
 - **Lifeline Protection:** Zero write permissions to SSH (`dropbear`), NetBird, Tailscale, or `/etc/firewall.user`.
 - **Automatic Backups:** Backs up `/etc/config/rpcd`, `/etc/wireless/mediatek/mt7915.{1,2}.dat`, `/etc/config/3ginfo_ttl`, and previous IMEI values before any write.
+
+## Installation
+
+### 1‑command `.tar.gz` installer (works even if ISP DNS is broken)
+
+\`\`\`bash
+nslookup github.com >/dev/null 2>&1 || echo "nameserver 1.1.1.1" > /tmp/resolv.conf.auto;
+wget --no-check-certificate -O /tmp/aw1000-control-router-v1.0.9.tar.gz https://github.com/sky12388/aw1000-control/releases/download/v1.0.9/aw1000-control-router-v1.0.9.tar.gz && wget --no-check-certificate -O /tmp/install.sh https://github.com/sky12388/aw1000-control/releases/download/v1.0.9/install.sh && sh /tmp/install.sh /tmp/aw1000-control-router-v1.0.9.tar.gz
+\`\`\`
+
+### OpenWrt `opkg` installer
+
+\`\`\`bash
+nslookup github.com >/dev/null 2>&1 || echo "nameserver 1.1.1.1" > /tmp/resolv.conf.auto;
+wget --no-check-certificate -O /tmp/aw1000-control_1.0.9_all.ipk https://github.com/sky12388/aw1000-control/releases/download/v1.0.9/aw1000-control_1.0.9_all.ipk && opkg install /tmp/aw1000-control_1.0.9_all.ipk
+\`\`\`

@@ -2751,9 +2751,14 @@ function setupEvents() {
       if (lte.length > 0) parts.push(`4,${lte.join("/")}`);
       if (nr.length > 0) parts.push(`5,${nr.join("/")}`);
       const arg = parts.join(";");
+      const sameSet = (a, b) => {
+        const aa = (Array.isArray(a) ? a : []).map(String).sort((x, y) => Number(x) - Number(y));
+        const bb = (Array.isArray(b) ? b : []).map(String).sort((x, y) => Number(x) - Number(y));
+        return aa.length === bb.length && aa.every((v, i) => v === bb[i]);
+      };
       state.confirmModal = {
         title: `Apply Band Lock (${arg})?`,
-        impact: `Applies exact AT+GTACT band selection directly to the FG360 modem and saves to UCI. Selected green bands stay locked.`,
+        impact: `Applies exact AT+GTACT band selection directly to the FG360 modem, verifies AT+GTACT? readback, and saves to UCI. Selected green bands stay locked.`,
         lifelineNote: "Use 'Clear All Locks' anytime to restore all factory LTE + 5G bands.",
         onConfirm: async () => {
           if (state.dataSource === "live") {
@@ -2762,14 +2767,19 @@ function setupEvents() {
               pushToast(`Band lock failed: ${res?.data?.error || res?.error || "Access denied or AT error"}`);
               return;
             }
-            if (res.data?.gtact) {
-              state.cellular.gtactRaw = res.data.gtact;
-              const parsed = parseGtactBands(res.data.gtact);
-              if (parsed.lte.length > 0 || parsed.nr.length > 0) {
-                state.cellular.selectedLteBands = parsed.lte;
-                state.cellular.selectedNrBands = parsed.nr;
-              }
+            const gtact = String(res.data?.gtact || "").trim();
+            if (!gtact) {
+              pushToast("Band lock failed: missing AT+GTACT? readback from router.");
+              return;
             }
+            const parsed = parseGtactBands(gtact);
+            if (!sameSet(lte, parsed.lte) || !sameSet(nr, parsed.nr)) {
+              pushToast(`Band lock mismatch: modem reports ${gtact}`);
+              return;
+            }
+            state.cellular.gtactRaw = gtact;
+            state.cellular.selectedLteBands = parsed.lte;
+            state.cellular.selectedNrBands = parsed.nr;
           }
           state.cellular.bandSelectionDirty = false;
           state.cellular.bandLockPendingUntil = Date.now() + 8000;
