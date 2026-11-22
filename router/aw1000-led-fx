@@ -38,9 +38,9 @@ start_stock_daemon() {
 
 run_lua_fx() {
 	fx_mode="$1"
-	lua - "$fx_mode" "$PID_FILE" <<'LUA' </dev/null >/dev/null 2>&1 &
+	LUA_SCRIPT="/tmp/aw1000-led-fx.lua"
+	cat <<'LUA' > "$LUA_SCRIPT"
 local mode = arg[1] or "knight"
-local pid_file = arg[2]
 local ok_nixio, nixio = pcall(require, "nixio")
 
 local function msleep(ms)
@@ -180,6 +180,7 @@ elseif mode == "traffic" then
 	end
 end
 LUA
+	lua "$LUA_SCRIPT" "$fx_mode" </dev/null >/dev/null 2>&1 &
 	echo "$!" > "$PID_FILE"
 }
 
