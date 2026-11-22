@@ -32,7 +32,7 @@ else
 fi
 
 echo "[1/4] Backing up /etc/config/rpcd..."
-[ -f /etc/config/rpcd.pre-pwa.bak ] || cp -p /etc/config/rpcd /etc/config/rpcd.pre-pwa.bak
+[ -f /etc/config/rpcd ] && cp /etc/config/rpcd /etc/config/rpcd.bak || true
 
 echo "[2/4] Extracting PWA (/www/app), CGI gateway (/www/cgi-bin/ubus), and rpcd plugin..."
 tar -C / -xzf "$SRC"
