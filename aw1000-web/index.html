@@ -43,10 +43,10 @@
         <div class="eyebrow">OpenWrt · Fibocom FG360 · MT7915 Dual-Band</div>
         <h1>Supercharged 5G Control for Your <span class="text-rgb">AW1000 Ultra</span></h1>
         <p class="hero-desc">
-          A blazing-fast 33 KB Progressive Web App hosted directly on your router plus a 645 KB native
-          Android companion APK. Monitor 5G/LTE Carrier Aggregation, align antennas by ear, manage TTL
-          spoofing, IMEI, Wi-Fi channels, and MAC ACLs — locally on LAN or remotely over NetBird, Tailscale,
-          or WireGuard.
+          A blazing-fast 42 KB Progressive Web App hosted directly on your router plus a 644 KB native
+          Android companion APK. Monitor 5G/LTE Carrier Aggregation, align antennas by ear, lock 5G/4G bands
+          &amp; PCI cells, customize front-panel LED FX &amp; Night Mode, and manage TTL, IMEI, Wi-Fi, SMS,
+          and MAC ACLs — locally on LAN or remotely over NetBird, Tailscale, or WireGuard.
         </p>
         <div class="hero-actions">
           <a class="btn btn-green" href="https://github.com/sky12388/aw1000-control/releases/download/v1.0.11/AW1000-Control-v1.0.11.apk">
@@ -116,7 +116,7 @@
         <h2>Built for Real 5G RF Tuning &amp; Remote Safety</h2>
         <p>Every feature runs directly on your AW1000 router with zero external cloud servers and strict lifeline protection for SSH, NetBird, Tailscale, and your firewall.</p>
       </div>
-      <div class="grid-4">
+      <div class="grid-3">
         <article class="card">
           <div class="card-top-bar signal"></div>
           <h3>10-Tier Signal Meter + Beeper</h3>
@@ -124,8 +124,13 @@
         </article>
         <article class="card">
           <div class="card-top-bar net"></div>
-          <h3>5G CA &amp; Tower Distance</h3>
-          <p>Live Fibocom FG360 NR-NSA / SA telemetry, PCI, Cell ID, real-time ICMP ping monitor, and estimated tower distance from Timing Advance (TA).</p>
+          <h3>5G CA, Band &amp; PCI Cell Lock</h3>
+          <p>Live Fibocom FG360 NR-NSA / SA telemetry, Green/Red interactive <code class="mono">AT+GTACT</code> band lock pills, serving PCI lock, ping monitor, and Timing Advance tower distance.</p>
+        </article>
+        <article class="card">
+          <div class="card-top-bar wifi"></div>
+          <h3>Front-Panel LED FX &amp; Night Mode</h3>
+          <p>1-tap Master LED ON/OFF stealth toggle plus 5 front-panel modes: Stock Status, Knight Rider Running Chase, Dancing Wave, and a live 5G Traffic VU-Meter.</p>
         </article>
         <article class="card">
           <div class="card-top-bar wifi"></div>
@@ -133,9 +138,14 @@
           <p>15-digit IMEI Luhn validator &amp; generator, persistent IPv4/IPv6 TTL/HL spoofing presets, and 1-tap Wi-Fi MAC Blacklist with Admin Anti-Lockout Guard.</p>
         </article>
         <article class="card">
+          <div class="card-top-bar net"></div>
+          <h3>SIM SMS Inbox &amp; APN Control</h3>
+          <p>Read, send, and delete SIM/ME SMS directly from the dashboard, switch IPv4/IPv6 APN profiles, and monitor live WAN download/upload throughput.</p>
+        </article>
+        <article class="card">
           <div class="card-top-bar signal"></div>
           <h3>Read-Only Guard &amp; Backups</h3>
-          <p>Read-only by default. Destructive actions require rpcd login + Impact Confirmation Sheets and create automatic backups before editing `.dat` files.</p>
+          <p>Read-only by default. Write actions require rpcd login + Impact Confirmation Sheets and never touch SSH, NetBird, Tailscale, or <code class="mono">/etc/firewall.user</code>.</p>
         </article>
       </div>
     </section>
@@ -158,10 +168,10 @@
           </p>
           <div class="dl-list">
             <a class="btn btn-primary" href="https://github.com/sky12388/aw1000-control/releases/download/v1.0.11/aw1000-control_1.0.11_all.ipk">
-              ↓ OpenWrt .ipk (77 KB)
+              ↓ OpenWrt .ipk (79 KB)
             </a>
             <a class="btn btn-ghost" href="https://github.com/sky12388/aw1000-control/releases/download/v1.0.11/aw1000-control-router-v1.0.11.tar.gz">
-              ↓ Router .tar.gz (76 KB)
+              ↓ Router .tar.gz (78 KB)
             </a>
           </div>
         </article>
