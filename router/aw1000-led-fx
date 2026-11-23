@@ -51,7 +51,7 @@ run_lua_fx() {
 local mode = arg[1] or "knight"
 local ok_nixio, nixio = pcall(require, "nixio")
 local ok_json, json = pcall(require, "luci.jsonc")
-math.randomseed(os.time() + (os.clock() * 100000))
+math.randomseed(math.floor(os.time()))
 
 local function msleep(ms)
 	if ok_nixio and nixio.nanosleep then
