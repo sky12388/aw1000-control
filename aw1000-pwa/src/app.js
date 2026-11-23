@@ -1750,7 +1750,7 @@ function renderSystemScreen() {
             { id: "mix",       label: "11. Mix Cycle" },
             { id: "random",    label: "12. Random FX" },
             { id: "heartbeat3",label: "13. Heartbeat 3×" },
-            { id: "wingtip",   label: "14. Wingtip Heartbeat" }
+            { id: "wingtip",   label: "14. Flight" }
           ].map((m) => `
             <button class="preset-pill ${(state.led?.mode || "stock") === m.id ? "active" : ""}"
               data-action="set-led-mode" data-led-mode="${m.id}" ${disabled}>
@@ -3277,7 +3277,7 @@ function setupEvents() {
         strobe: "4. Strobe", matrix: "5. Matrix Rain", stack: "6. Stack Fill",
         heartbeat: "7. Heartbeat", traffic: "8. WAN VU-Meter", signal: "9. 5G Signal Bar",
         guardian: "10. Ping Guardian", mix: "11. Mix Cycle", random: "12. Random FX",
-        heartbeat3: "13. Heartbeat 3×", wingtip: "14. Wingtip Heartbeat", dance: "Dancing Wave"
+        heartbeat3: "13. Heartbeat 3×", wingtip: "14. Flight", dance: "Dancing Wave"
       };
       pushToast(`Front LEDs set to: ${ledLabels[targetMode] || targetMode}`);
       render();
