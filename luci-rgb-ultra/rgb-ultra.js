@@ -27,8 +27,9 @@
         container.appendChild(wrap);
       }
     }
-    if (!btn || btn.getAttribute('data-rgb-bound') === '1') return;
+    if (!btn || btn.getAttribute('data-rgb-bound') === '1' || window.__rgbThemeToggleBound) return;
     btn.setAttribute('data-rgb-bound', '1');
+    window.__rgbThemeToggleBound = true;
 
     function sync() {
       var dark = document.documentElement.getAttribute('data-theme') === 'dark';
@@ -140,10 +141,119 @@
     schedule();
   };
 
+  /* System -> Startup Initscripts Enhancer: Default A-Z sort + Sort Toggle + Live Search */
+  function isStartupPage() {
+    var path = (window.location && window.location.pathname) || '';
+    var page = (document.body && document.body.getAttribute('data-page')) || '';
+    return path.indexOf('/system/startup') !== -1 || page === 'admin-system-startup';
+  }
+
+  function enhanceStartupTable() {
+    if (!isStartupPage()) return;
+    var tab = document.querySelector('[data-tab="init"]') || document;
+    var table = tab.querySelector('.table') || tab.querySelector('table');
+    if (!table || table.getAttribute('data-rgb-startup-init') === '1') return;
+
+    var getRows = function () {
+      var list = table.querySelectorAll('.tr:not(.table-titles)');
+      if (!list.length) list = table.querySelectorAll('tbody tr');
+      return Array.prototype.slice.call(list).filter(function (r) {
+        return !r.classList.contains('table-titles') && !r.querySelector('th, .th');
+      });
+    };
+
+    var rows = getRows();
+    if (!rows.length) return;
+
+    table.setAttribute('data-rgb-startup-init', '1');
+
+    var getCells = function (row) {
+      var c = row.querySelectorAll(':scope > .td');
+      if (!c.length) c = row.querySelectorAll('td');
+      return c;
+    };
+
+    var sortMode = 'alpha'; // Default: alphabetical A-Z by service name
+
+    var bar = document.createElement('div');
+    bar.id = 'rgb-startup-bar';
+    bar.className = 'rgb-startup-bar';
+    bar.innerHTML =
+      '<div class="rgb-startup-search-wrap">' +
+        '<input type="search" id="rgb-startup-search" class="rgb-startup-input" ' +
+          'placeholder="Search initscripts (e.g. netbird, tailscale, adguard, fibocom)..." autocomplete="off" />' +
+        '<button type="button" id="rgb-startup-clear" class="btn rgb-startup-btn" title="Clear search">Clear</button>' +
+      '</div>' +
+      '<div class="rgb-startup-controls">' +
+        '<button type="button" id="rgb-startup-sort" class="btn rgb-startup-btn rgb-startup-sort-btn">Sort: A–Z</button>' +
+        '<span id="rgb-startup-count" class="rgb-startup-count"></span>' +
+      '</div>';
+
+    table.parentNode.insertBefore(bar, table);
+
+    var searchInput = bar.querySelector('#rgb-startup-search');
+    var clearBtn = bar.querySelector('#rgb-startup-clear');
+    var sortBtn = bar.querySelector('#rgb-startup-sort');
+    var countEl = bar.querySelector('#rgb-startup-count');
+
+    function applySortAndFilter() {
+      var curRows = getRows();
+      var parent = curRows[0] ? curRows[0].parentNode : table;
+      curRows.sort(function (a, b) {
+        var ca = getCells(a), cb = getCells(b);
+        var pa = parseInt((ca[0] && ca[0].textContent) || '999', 10);
+        var pb = parseInt((cb[0] && cb[0].textContent) || '999', 10);
+        var na = ((ca[1] && ca[1].textContent) || '').trim().toLowerCase();
+        var nb = ((cb[1] && cb[1].textContent) || '').trim().toLowerCase();
+        if (sortMode === 'priority') {
+          if (pa !== pb) return pa - pb;
+          return na.localeCompare(nb);
+        }
+        var cmp = na.localeCompare(nb);
+        return cmp !== 0 ? cmp : (pa - pb);
+      });
+
+      var q = (searchInput.value || '').trim().toLowerCase();
+      var shown = 0;
+      for (var i = 0; i < curRows.length; i++) {
+        var row = curRows[i];
+        parent.appendChild(row);
+        var cells = getCells(row);
+        var prio = ((cells[0] && cells[0].textContent) || '').trim().toLowerCase();
+        var name = ((cells[1] && cells[1].textContent) || '').trim().toLowerCase();
+        var match = !q || name.indexOf(q) !== -1 || prio.indexOf(q) !== -1;
+        row.style.display = match ? '' : 'none';
+        if (match) {
+          shown++;
+          row.classList.remove('cbi-rowstyle-1', 'cbi-rowstyle-2');
+          row.classList.add((shown % 2 === 1) ? 'cbi-rowstyle-1' : 'cbi-rowstyle-2');
+        }
+      }
+      sortBtn.textContent = (sortMode === 'alpha') ? 'Sort: A–Z' : 'Sort: Boot Priority';
+      countEl.textContent = shown + ' / ' + curRows.length + ' services';
+      clearBtn.disabled = !q;
+    }
+
+    searchInput.addEventListener('input', applySortAndFilter);
+    clearBtn.addEventListener('click', function () {
+      searchInput.value = '';
+      applySortAndFilter();
+      searchInput.focus();
+    });
+    sortBtn.addEventListener('click', function () {
+      sortMode = (sortMode === 'alpha') ? 'priority' : 'alpha';
+      applySortAndFilter();
+    });
+
+    applySortAndFilter();
+  }
+
   document.addEventListener('DOMContentLoaded', function () {
     mountThemeToggle();
+    enhanceStartupTable();
     scan(document);
     var observer = new MutationObserver(function (records) {
+      enhanceStartupTable();
       for (var i = 0; i < records.length; i++) {
         var target = records[i].target;
         if (target && target.nodeType === 1 && target.hasAttribute(MARK)) continue;

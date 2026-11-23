@@ -461,3 +461,52 @@ html[data-theme="light"] .ginfo-dashboard .cbi-progressbar>div{
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation:none!important;transition:none!important}
 }
+
+/* System -> Startup Initscripts Live Search + Sort Toolbar */
+.rgb-startup-bar{
+  display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;
+  margin:12px 0 14px;padding:12px 14px;border-radius:14px;
+  background:#ffffff!important;border:1px solid #cbd5e1!important;
+  box-shadow:0 4px 16px rgba(15,23,42,.08);
+}
+html[data-theme="dark"] .rgb-startup-bar{
+  background:#131829!important;border:1px solid rgba(56,189,248,.35)!important;
+  box-shadow:0 6px 20px rgba(0,0,0,.35),0 0 14px rgba(56,189,248,.12);
+}
+.rgb-startup-search-wrap{
+  display:flex;align-items:center;gap:8px;flex:1 1 280px;min-width:220px;
+}
+.rgb-startup-input{
+  flex:1 1 auto;min-height:36px;padding:7px 12px!important;border-radius:10px!important;
+  font-size:14px!important;font-weight:500!important;outline:none!important;
+  background:#f8fafc!important;color:#0f172a!important;border:1px solid #94a3b8!important;
+}
+.rgb-startup-input:focus{
+  border-color:#2563eb!important;box-shadow:0 0 0 3px rgba(37,99,235,.2)!important;
+}
+html[data-theme="dark"] .rgb-startup-input{
+  background:#0b0f19!important;color:#f8fafc!important;border:1px solid #475569!important;
+}
+html[data-theme="dark"] .rgb-startup-input::placeholder{color:#94a3b8!important}
+html[data-theme="dark"] .rgb-startup-input:focus{
+  border-color:#38bdf8!important;box-shadow:0 0 0 3px rgba(56,189,248,.22)!important;
+}
+.rgb-startup-controls{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+}
+.rgb-startup-btn{
+  min-height:36px!important;padding:6px 13px!important;border-radius:10px!important;
+  font-size:13px!important;font-weight:700!important;cursor:pointer!important;
+}
+.rgb-startup-sort-btn{
+  background:linear-gradient(135deg,#2563eb,#7c3aed)!important;color:#ffffff!important;
+  border:1px solid rgba(255,255,255,.22)!important;
+  box-shadow:0 0 12px rgba(124,58,237,.35)!important;
+}
+.rgb-startup-count{
+  font-size:12px!important;font-weight:700!important;padding:5px 10px;border-radius:999px;
+  background:#e2e8f0!important;color:#0f172a!important;white-space:nowrap;
+}
+html[data-theme="dark"] .rgb-startup-count{
+  background:#1e293b!important;color:#38bdf8!important;border:1px solid rgba(56,189,248,.3)!important;
+}
