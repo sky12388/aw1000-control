@@ -1735,11 +1735,20 @@ function renderSystemScreen() {
 
         <div class="preset-row">
           ${[
-            { id: "stock", label: "Stock Status" },
-            { id: "knight", label: "Running Chase" },
-            { id: "dance", label: "Dancing Wave" },
-            { id: "traffic", label: "5G VU-Meter" },
-            { id: "off", label: "Lights Off" }
+            { id: "stock",     label: "Stock Status" },
+            { id: "off",       label: "Lights Off" },
+            { id: "knight",    label: "1. Knight Chase" },
+            { id: "comet",     label: "2. Comet Drop" },
+            { id: "ripple",    label: "3. Center Ripple" },
+            { id: "strobe",    label: "4. Strobe" },
+            { id: "matrix",    label: "5. Matrix Rain" },
+            { id: "stack",     label: "6. Stack Fill" },
+            { id: "heartbeat", label: "7. Heartbeat" },
+            { id: "traffic",   label: "8. WAN VU-Meter" },
+            { id: "signal",    label: "9. 5G Signal Bar" },
+            { id: "guardian",  label: "10. Ping Guardian" },
+            { id: "mix",       label: "11. Mix Cycle" },
+            { id: "random",    label: "12. Random FX" }
           ].map((m) => `
             <button class="preset-pill ${(state.led?.mode || "stock") === m.id ? "active" : ""}"
               data-action="set-led-mode" data-led-mode="${m.id}" ${disabled}>
@@ -3260,7 +3269,14 @@ function setupEvents() {
       } else {
         state.led = { mode: targetMode, enabled: targetMode !== "off", lastMode: targetMode === "off" ? lastMode : targetMode };
       }
-      const ledLabels = { stock: "Stock Status", off: "Lights Off", knight: "Running Chase", dance: "Dancing Wave", traffic: "5G VU-Meter" };
+      const ledLabels = {
+        stock: "Stock Status", off: "Lights Off",
+        knight: "1. Knight Chase", comet: "2. Comet Drop", ripple: "3. Center Ripple",
+        strobe: "4. Strobe", matrix: "5. Matrix Rain", stack: "6. Stack Fill",
+        heartbeat: "7. Heartbeat", traffic: "8. WAN VU-Meter", signal: "9. 5G Signal Bar",
+        guardian: "10. Ping Guardian", mix: "11. Mix Cycle", random: "12. Random FX",
+        dance: "Dancing Wave"
+      };
       pushToast(`Front LEDs set to: ${ledLabels[targetMode] || targetMode}`);
       render();
     } else if (action === "reboot-router") {

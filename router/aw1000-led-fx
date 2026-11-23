@@ -1,6 +1,8 @@
 #!/bin/sh
 # ==============================================================================
-# AW1000 Front-Panel LED FX Controller (stock | off | knight | dance | traffic)
+# AW1000 Front-Panel LED FX Controller (12 Animations + Stock + Off)
+# Modes: stock | off | knight | comet | ripple | strobe | matrix | stack |
+#        heartbeat | traffic | signal | guardian | mix | random | dance
 # Safe: only touches /sys/class/leds/* and /etc/init.d/led_ctrld.init.
 # Never touches SSH, NetBird, Tailscale, firewall, or modem.
 # ==============================================================================
@@ -48,6 +50,8 @@ run_lua_fx() {
 	cat <<'LUA' > "$LUA_SCRIPT"
 local mode = arg[1] or "knight"
 local ok_nixio, nixio = pcall(require, "nixio")
+local ok_json, json = pcall(require, "luci.jsonc")
+math.randomseed(os.time() + (os.clock() * 100000))
 
 local function msleep(ms)
 	if ok_nixio and nixio.nanosleep then
@@ -111,62 +115,167 @@ local function read_bytes(iface)
 end
 
 local function find_wan_iface()
-	for _, ifc in ipairs({ "ccmni2", "ccmni1", "ccmni0", "eth0" }) do
+	-- Prefer whichever ccmni interface carries the default route
+	local p = io.popen("ip route show default 2>/dev/null")
+	if p then
+		local line = p:read("*l") or ""
+		p:close()
+		local dev = line:match("dev%s+(%S+)")
+		if dev and dev ~= "" then return dev end
+	end
+	for _, ifc in ipairs({ "ccmni1", "ccmni2", "ccmni0", "eth0" }) do
 		local f = io.open("/sys/class/net/" .. ifc .. "/statistics/rx_bytes", "r")
 		if f then f:close(); return ifc end
 	end
-	return "ccmni2"
+	return "ccmni1"
 end
 
-if mode == "knight" then
+local function read_telemetry()
+	if not ok_json then return nil end
+	local p = io.popen("/usr/bin/aw1000-telemetry --full 2>/dev/null")
+	if not p then return nil end
+	local raw = p:read("*a") or ""
+	p:close()
+	return json.parse(raw)
+end
+
+-- Each animation runs one full cycle (~2-4 seconds) so mix & random can compose cleanly
+local fx = {}
+
+function fx.knight(cycles)
 	local colors = { "green", "amber", "red" }
-	local cidx = 1
 	local seq = { 1, 2, 3, 4, 5, 6, 5, 4, 3, 2 }
-	while true do
-		local col = colors[cidx]
+	for c = 1, (cycles or 3) do
+		local col = colors[((c - 1) % #colors) + 1]
 		for _, pos in ipairs(seq) do
 			all_off()
 			set_slot(pos, col)
-			msleep(120)
+			msleep(110)
 		end
-		cidx = (cidx % #colors) + 1
 	end
-elseif mode == "dance" then
-	local step = 0
-	local palette = { "green", "amber", "red", "green", "red", "amber" }
-	while true do
-		step = step + 1
-		local pat = step % 4
-		if pat == 0 then
-			for i = 1, #slots do
-				set_slot(i, (i % 2 == 0) and "green" or "red")
-			end
-		elseif pat == 1 then
-			for i = 1, #slots do
-				set_slot(i, (i % 2 == 1) and "amber" or "off")
-			end
-		elseif pat == 2 then
-			for i = 1, #slots do
-				set_slot(i, (i % 2 == 0) and "red" or "green")
-			end
-		else
-			for i = 1, #slots do
-				set_slot(i, palette[((i + step) % #palette) + 1])
-			end
+end
+
+function fx.comet(cycles)
+	for _ = 1, (cycles or 3) do
+		for head = 1, 8 do
+			all_off()
+			if head >= 1 and head <= 6 then set_slot(head, "red") end
+			if head - 1 >= 1 and head - 1 <= 6 then set_slot(head - 1, "amber") end
+			if head - 2 >= 1 and head - 2 <= 6 then set_slot(head - 2, "green") end
+			msleep(115)
 		end
+		all_off()
 		msleep(220)
 	end
-elseif mode == "traffic" then
-	local ifc = find_wan_iface()
-	local prev = read_bytes(ifc)
-	while true do
+end
+
+function fx.ripple(cycles)
+	local colors = { "green", "amber", "red" }
+	local frames = {
+		{ 3, 4 },
+		{ 2, 5 },
+		{ 1, 6 },
+		{ 2, 5 },
+		{ 3, 4 }
+	}
+	for c = 1, (cycles or 3) do
+		local col = colors[((c - 1) % #colors) + 1]
+		for _, pair in ipairs(frames) do
+			all_off()
+			set_slot(pair[1], col)
+			set_slot(pair[2], col)
+			msleep(160)
+		end
+	end
+end
+
+function fx.strobe(cycles)
+	for _ = 1, (cycles or 4) do
+		for _ = 1, 2 do
+			all_off()
+			set_slot(1, "red"); set_slot(2, "red"); set_slot(3, "red")
+			msleep(75)
+			all_off()
+			msleep(55)
+		end
+		for _ = 1, 2 do
+			all_off()
+			set_slot(4, "green"); set_slot(5, "green"); set_slot(6, "green")
+			msleep(75)
+			all_off()
+			msleep(55)
+		end
+	end
+end
+
+function fx.matrix(steps)
+	local cols = { "green", "green", "green", "amber" }
+	for _ = 1, (steps or 22) do
+		all_off()
+		local n = math.random(2, 4)
+		for _ = 1, n do
+			set_slot(math.random(1, 6), cols[math.random(1, #cols)])
+		end
+		msleep(135)
+	end
+end
+
+function fx.stack(cycles)
+	for _ = 1, (cycles or 2) do
+		all_off()
+		for level = 1, 6 do
+			local slot = 7 - level
+			local col = (level <= 2) and "green" or ((level <= 4) and "amber" or "red")
+			set_slot(slot, col)
+			msleep(140)
+		end
 		msleep(350)
-		local cur = read_bytes(ifc)
-		local delta = cur - prev
+		for level = 6, 1, -1 do
+			set_slot(7 - level, "off")
+			msleep(100)
+		end
+		msleep(180)
+	end
+end
+
+function fx.heartbeat(cycles)
+	for _ = 1, (cycles or 2) do
+		all_off()
+		set_slot(1, "green"); msleep(130)
+		all_off();            msleep(120)
+		set_slot(1, "green"); msleep(130)
+		all_off();            msleep(900)
+	end
+end
+
+function fx.dance(steps)
+	local palette = { "green", "amber", "red", "green", "red", "amber" }
+	for step = 1, (steps or 12) do
+		local pat = step % 4
+		if pat == 0 then
+			for i = 1, 6 do set_slot(i, (i % 2 == 0) and "green" or "red") end
+		elseif pat == 1 then
+			for i = 1, 6 do set_slot(i, (i % 2 == 1) and "amber" or "off") end
+		elseif pat == 2 then
+			for i = 1, 6 do set_slot(i, (i % 2 == 0) and "red" or "green") end
+		else
+			for i = 1, 6 do set_slot(i, palette[((i + step) % #palette) + 1]) end
+		end
+		msleep(200)
+	end
+end
+
+local wan_ifc = find_wan_iface()
+local prev_bytes = read_bytes(wan_ifc)
+
+function fx.traffic(ticks)
+	for _ = 1, (ticks or 10) do
+		msleep(320)
+		local cur = read_bytes(wan_ifc)
+		local delta = cur - prev_bytes
 		if delta < 0 then delta = 0 end
-		prev = cur
-		-- Convert bytes per 0.35s into approx KB/s
-		local kbps = (delta / 1024.0) / 0.35
+		prev_bytes = cur
+		local kbps = (delta / 1024.0) / 0.32
 		local level = 1
 		if kbps >= 5000 then level = 6
 		elseif kbps >= 1500 then level = 5
@@ -174,15 +283,101 @@ elseif mode == "traffic" then
 		elseif kbps >= 80 then level = 3
 		elseif kbps >= 10 then level = 2
 		else level = 1 end
-		for i = 1, #slots do
+		for i = 1, 6 do
+			local slot = 7 - i
 			if i <= level then
-				if i <= 3 then set_slot(i, "green")
-				elseif i <= 5 then set_slot(i, "amber")
-				else set_slot(i, "red") end
+				if i <= 3 then set_slot(slot, "green")
+				elseif i <= 5 then set_slot(slot, "amber")
+				else set_slot(slot, "red") end
 			else
-				set_slot(i, "off")
+				set_slot(slot, "off")
 			end
 		end
+	end
+end
+
+function fx.signal(ticks)
+	for _ = 1, (ticks or 2) do
+		local tm = read_telemetry()
+		local rsrp, sinr = -115, 0
+		if tm and tm.cell then
+			if tm.cell.nr and type(tm.cell.nr.rsrp) == "number" then
+				rsrp = tm.cell.nr.rsrp
+				sinr = tonumber(tm.cell.nr.sinr) or 0
+			elseif tm.cell.lte and type(tm.cell.lte.rsrp) == "number" then
+				rsrp = tm.cell.lte.rsrp
+				sinr = tonumber(tm.cell.lte.sinr) or 0
+			end
+		end
+		local r_norm = math.max(0, math.min(1, (rsrp + 125) / 50))
+		local s_norm = math.max(0, math.min(1, (sinr + 5) / 30))
+		local score = 0.6 * r_norm + 0.4 * s_norm
+		local bars = math.max(1, math.min(6, math.floor(1 + score * 5 + 0.5)))
+		local col = (bars <= 2) and "red" or ((bars <= 4) and "amber" or "green")
+		for i = 1, 6 do
+			local slot = 7 - i
+			set_slot(slot, (i <= bars) and col or "off")
+		end
+		msleep(1500)
+	end
+end
+
+function fx.guardian(ticks)
+	for _ = 1, (ticks or 2) do
+		local tm = read_telemetry()
+		local ping = tm and tm.wan and tonumber(tm.wan.ping_ms) or nil
+		local temp = tm and tm.sys and tonumber(tm.sys.t_soc) or 45
+		local ip4 = tm and tm.wan and tm.wan.ip4 or ""
+		if ip4 == "" or ping == nil then
+			-- WAN down: urgent red flash
+			for _ = 1, 3 do
+				for i = 1, 6 do set_slot(i, "red") end
+				msleep(220)
+				all_off()
+				msleep(220)
+			end
+		elseif ping > 80 or temp > 65 then
+			-- High ping or warm SoC: amber pulse
+			all_off()
+			set_slot(1, "amber"); set_slot(4, "amber"); set_slot(5, "amber")
+			msleep(1200)
+			all_off()
+			msleep(300)
+		else
+			-- Healthy: calm green status + signal
+			all_off()
+			set_slot(1, "green"); set_slot(2, "green"); set_slot(3, "green")
+			msleep(1500)
+		end
+	end
+end
+
+local mix_order = { "knight", "comet", "ripple", "matrix", "stack", "dance", "strobe", "heartbeat" }
+
+if mode == "mix" then
+	local idx = 1
+	while true do
+		local name = mix_order[idx]
+		if fx[name] then fx[name]() end
+		idx = (idx % #mix_order) + 1
+	end
+elseif mode == "random" then
+	local last = ""
+	while true do
+		local pick = mix_order[math.random(1, #mix_order)]
+		if pick == last then
+			pick = mix_order[(math.random(1, #mix_order) % #mix_order) + 1]
+		end
+		last = pick
+		if fx[pick] then fx[pick]() end
+	end
+elseif fx[mode] then
+	while true do
+		fx[mode]()
+	end
+else
+	while true do
+		fx.knight()
 	end
 end
 LUA
@@ -190,15 +385,18 @@ LUA
 	echo "$!" > "$PID_FILE"
 }
 
+is_valid_mode() {
+	case "$1" in
+		stock|off|knight|comet|ripple|strobe|matrix|stack|heartbeat|traffic|signal|guardian|mix|random|dance) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
 get_state() {
 	mode="stock"
 	[ -f "$MODE_FILE" ] && mode="$(cat "$MODE_FILE" 2>/dev/null)"
-	case "$mode" in
-		stock|off|knight|dance|traffic) ;;
-		*) mode="stock" ;;
-	esac
-	# If an animation mode was saved but loop died, report stock
-	if [ "$mode" = "knight" ] || [ "$mode" = "dance" ] || [ "$mode" = "traffic" ]; then
+	is_valid_mode "$mode" || mode="stock"
+	if [ "$mode" != "stock" ] && [ "$mode" != "off" ]; then
 		pid="$(cat "$PID_FILE" 2>/dev/null)"
 		if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
 			mode="stock"
@@ -206,6 +404,7 @@ get_state() {
 	fi
 	last_on="stock"
 	[ -f "$LAST_ON_FILE" ] && last_on="$(cat "$LAST_ON_FILE" 2>/dev/null)"
+	is_valid_mode "$last_on" || last_on="stock"
 	[ "$mode" = "off" ] && enabled="false" || enabled="true"
 	printf '{"ok":true,"mode":"%s","enabled":%s,"last_mode":"%s"}\n' "$mode" "$enabled" "$last_on"
 }
@@ -217,6 +416,10 @@ case "$cmd" in
 		;;
 	set)
 		mode="${2:-stock}"
+		if ! is_valid_mode "$mode"; then
+			echo '{"ok":false,"error":"Invalid LED mode"}'
+			exit 0
+		fi
 		case "$mode" in
 			stock)
 				stop_fx_loop
@@ -233,7 +436,7 @@ case "$cmd" in
 				echo "off" > "$MODE_FILE"
 				get_state
 				;;
-			knight|dance|traffic)
+			*)
 				stop_fx_loop
 				stop_stock_daemon
 				clear_all_leds
@@ -242,14 +445,10 @@ case "$cmd" in
 				run_lua_fx "$mode"
 				get_state
 				;;
-			*)
-				echo '{"ok":false,"error":"Invalid LED mode (use stock|off|knight|dance|traffic)"}'
-				exit 0
-				;;
 		esac
 		;;
 	*)
-		echo '{"ok":false,"error":"Usage: aw1000-led-fx get | set <stock|off|knight|dance|traffic>"}'
+		echo '{"ok":false,"error":"Usage: aw1000-led-fx get | set <mode>"}'
 		exit 0
 		;;
 esac

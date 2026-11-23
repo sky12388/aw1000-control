@@ -127,7 +127,7 @@ case "$1" in
 			json_add_string "tag" "manual"
 		json_close_object
 		json_add_object "led_set"
-			json_add_string "mode" "stock|off|knight|dance|traffic"
+			json_add_string "mode" "stock|off|knight|comet|ripple|strobe|matrix|stack|heartbeat|traffic|signal|guardian|mix|random|dance"
 		json_close_object
 		json_dump
 		;;
@@ -937,9 +937,9 @@ LUA
 				json_load "$input" 2>/dev/null
 				json_get_var mode mode
 				case "$mode" in
-					stock|off|knight|dance|traffic) ;;
+					stock|off|knight|comet|ripple|strobe|matrix|stack|heartbeat|traffic|signal|guardian|mix|random|dance) ;;
 					*)
-						echo '{"ok":false,"error":"Invalid LED mode (use stock|off|knight|dance|traffic)"}'
+						echo '{"ok":false,"error":"Invalid LED mode"}'
 						exit 0
 						;;
 				esac
