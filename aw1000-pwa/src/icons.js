@@ -95,5 +95,10 @@ export const ICONS = {
   usb: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none">
     <rect x="6" y="8" width="12" height="13" rx="2.5" fill="currentColor" fill-opacity="0.18" stroke="currentColor" stroke-width="2"/>
     <path d="M8 8V4h8v4M10 6h1m2 0h1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  </svg>`,
+
+  packages: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+    <path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3Z" fill="currentColor" fill-opacity="0.18" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+    <path d="M12 12l8-4.5M12 12v9M12 12L4 7.5M16 5.25L8 9.75" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
   </svg>`
 };

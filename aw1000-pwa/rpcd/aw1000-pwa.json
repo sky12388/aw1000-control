@@ -35,6 +35,10 @@
           "backup_list",
           "logs_get",
           "led_get"
+        ],
+        "aw1000-svc": [
+          "svc_list",
+          "opkg_list"
         ]
       },
       "uci": [ "network", "wireless", "dhcp", "system" ]
@@ -64,6 +68,12 @@
           "modem_restart",
           "backup_create",
           "led_set"
+        ],
+        "aw1000-svc": [
+          "svc_action",
+          "opkg_update",
+          "opkg_install",
+          "opkg_remove"
         ]
       }
     }

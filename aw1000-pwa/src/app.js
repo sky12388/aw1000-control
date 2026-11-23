@@ -1827,7 +1827,255 @@ function renderSystemScreen() {
 }
 
 // ============================================================================
-// Screen 7: Remote Access & Firewall Lifelines (VPN-Agnostic & Strictly Read-Only)
+// Screen 7: Software & Services (init.d Service Control + opkg Package Manager)
+// ============================================================================
+
+const PROTECTED_OPKG_SET = new Set([
+  "dropbear", "uhttpd", "rpcd", "ubus", "ubusd", "busybox", "libc",
+  "base-files", "netifd", "procd", "opkg", "firewall", "dnsmasq",
+  "netbird", "tailscale", "aw1000-control"
+]);
+
+function appendOpkgLog(header, body = "") {
+  const ts = new Date().toLocaleTimeString();
+  const block = `[${ts}] ${header}${body ? "\n" + String(body).trim() : ""}`;
+  state.opkgConsoleLog = state.opkgConsoleLog
+    ? `${state.opkgConsoleLog}\n\n${block}`
+    : block;
+}
+
+function renderSoftwareScreen() {
+  if (state.dataSource === "live" && state.liveLoading) {
+    return renderLoadingSkeleton();
+  }
+
+  const locked = !state.editMode;
+  const svcs = Array.isArray(state.svcList) ? state.svcList : [];
+  const ov = state.opkgOverlay || { total_kb: 0, used_kb: 0, avail_kb: 0, avail_mb: 0 };
+  const usedPct = ov.total_kb > 0 ? Math.min(100, Math.round((ov.used_kb / ov.total_kb) * 100)) : 0;
+  const availGb = ov.avail_kb >= 1048576
+    ? `${(ov.avail_kb / 1048576).toFixed(2)} GB`
+    : `${Math.round((ov.avail_kb || 0) / 1024)} MB`;
+  const totalGb = ov.total_kb >= 1048576
+    ? `${(ov.total_kb / 1048576).toFixed(2)} GB`
+    : `${Math.round((ov.total_kb || 0) / 1024)} MB`;
+
+  const pkgs = Array.isArray(state.opkgPackages) ? state.opkgPackages : [];
+  const curFilter = state.opkgFilter || "installed";
+  const q = String(state.opkgSearch || "").trim().toLowerCase();
+  const displayPkgs = state.dataSource === "mock"
+    ? pkgs.filter((p) => {
+        const mf = curFilter === "all" || (curFilter === "installed" ? p.installed : !p.installed);
+        const mq = !q || p.name.toLowerCase().includes(q) || (p.desc || "").toLowerCase().includes(q);
+        return mf && mq;
+      })
+    : pkgs;
+
+  return `
+    <div style="display:flex; flex-direction:column; gap:18px;">
+      <!-- Section A: Service Control Cards -->
+      <article class="card">
+        <div class="card-accent-bar net"></div>
+        <div class="card-header flex-wrap gap-2">
+          <div class="card-title-wrap min-w-0">
+            <div class="card-icon net">${ICONS.packages}</div>
+            <div class="card-title-text min-w-0">
+              <h1 class="card-title">Service Control (init.d)</h1>
+              <p class="card-subtitle">Start, stop, restart &amp; toggle boot startup · Dropbear SSH protected under Lifeline Guard</p>
+            </div>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <span class="qual-badge ${locked ? "fair" : "excellent"} whitespace-nowrap shrink-0">
+              <span class="qual-dot"></span>
+              <span>${locked ? "Read-Only (Unlock Edit Mode)" : "Edit Mode Unlocked"}</span>
+            </span>
+            <button class="icon-btn" data-action="svc-refresh" ${state.svcLoading ? "disabled" : ""}>
+              ${ICONS.refresh}
+              <span>${state.svcLoading ? "Refreshing..." : "Refresh"}</span>
+            </button>
+          </div>
+        </div>
+
+        ${svcs.length === 0 ? `
+          <div class="rf-stat" style="padding:16px;">
+            ${state.svcLoading ? "Loading service status from /usr/libexec/rpcd/aw1000-svc..." : "No service telemetry loaded yet. Click Refresh to query init.d services."}
+          </div>
+        ` : `
+          <div class="svc-grid">
+            ${svcs.map((s) => {
+              const isBusy = state.svcBusy === s.name;
+              const isProt = Boolean(s.protected);
+              const ctrlDisabled = (locked || isProt || !s.installed || isBusy) ? "disabled" : "";
+              const statusClass = !s.installed ? "fair" : (s.running ? "excellent" : "poor");
+              const statusText = !s.installed ? "NOT INSTALLED" : (s.running ? "RUNNING" : "STOPPED");
+              return `
+                <div class="svc-card ${isProt ? "is-protected" : ""}">
+                  <div class="svc-card-top">
+                    <div class="min-w-0">
+                      <strong style="font-size:0.95rem;">${escapeHtml(s.label || s.name)}</strong>
+                      <div class="card-subtitle" style="font-size:0.77rem; margin-top:2px;">${escapeHtml(s.note || "")}</div>
+                    </div>
+                    <span class="qual-badge ${statusClass} whitespace-nowrap shrink-0">
+                      <span class="qual-dot"></span>
+                      <span>${statusText}</span>
+                    </span>
+                  </div>
+
+                  <div class="svc-boot-row">
+                    <label class="svc-boot-toggle">
+                      <input type="checkbox" data-svc-boot="${escapeHtml(s.name)}"
+                        ${s.enabled ? "checked" : ""} ${ctrlDisabled}/>
+                      <span>Enable on boot</span>
+                    </label>
+                    ${isProt
+                      ? `<span class="qual-badge good whitespace-nowrap shrink-0" style="font-size:0.7rem;">${ICONS.lock} LIFELINE</span>`
+                      : `<span class="mono" style="font-size:0.75rem; color:var(--text-muted);">${s.enabled ? "Auto-start ON" : "Manual"}</span>`}
+                  </div>
+
+                  ${isProt ? `
+                    <div class="lifeline-ok" style="padding:8px 10px; font-size:0.76rem;">
+                      ${ICONS.shield} Read-only under Lifeline Guard — SSH :22 cannot be stopped or disabled here.
+                    </div>
+                  ` : `
+                    <div class="svc-actions">
+                      <button class="btn btn-primary-wifi" data-action="svc-action"
+                        data-svc="${escapeHtml(s.name)}" data-svc-act="start"
+                        ${(ctrlDisabled || s.running) ? "disabled" : ""}>
+                        ${isBusy ? "..." : "Start"}
+                      </button>
+                      <button class="btn btn-danger-signal" data-action="svc-action"
+                        data-svc="${escapeHtml(s.name)}" data-svc-act="stop"
+                        ${(ctrlDisabled || !s.running) ? "disabled" : ""}>
+                        ${isBusy ? "..." : "Stop"}
+                      </button>
+                      <button class="btn btn-secondary" data-action="svc-action"
+                        data-svc="${escapeHtml(s.name)}" data-svc-act="restart"
+                        ${ctrlDisabled}>
+                        ${isBusy ? "..." : "Restart"}
+                      </button>
+                    </div>
+                  `}
+                </div>
+              `;
+            }).join("")}
+          </div>
+        `}
+      </article>
+
+      <!-- Section B: Package Manager (opkg) -->
+      <article class="card">
+        <div class="card-accent-bar wifi"></div>
+        <div class="card-header flex-wrap gap-2">
+          <div class="card-title-wrap min-w-0">
+            <div class="card-icon wifi">${ICONS.system}</div>
+            <div class="card-title-text min-w-0">
+              <h2 class="card-title">Package Manager (opkg)</h2>
+              <p class="card-subtitle">
+                ${state.opkgInstalledCount || 0} installed${state.opkgListsUpdated ? ` · ${state.opkgAvailableCount || 0} in feeds` : " · run opkg update to fetch feeds"}
+              </p>
+            </div>
+          </div>
+          <button class="btn btn-primary-net" data-action="opkg-update"
+            ${(locked || state.opkgBusy) ? "disabled" : ""}>
+            ${ICONS.refresh} ${state.opkgBusy ? "Working..." : "Run opkg update"}
+          </button>
+        </div>
+
+        <!-- /overlay Free Space Check -->
+        <div class="opkg-meter-wrap">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; font-size:0.82rem; flex-wrap:wrap;">
+            <strong><code class="mono">/overlay</code> Storage Health</strong>
+            <span class="tabular" style="color:var(--text-secondary);">
+              <strong>${availGb} free</strong> of ${totalGb} (${usedPct}% used)
+            </span>
+          </div>
+          <div class="opkg-meter-bar">
+            <div class="opkg-meter-fill" style="width:${usedPct}%; ${usedPct > 85 ? "background:var(--grad-signal);" : ""}"></div>
+          </div>
+        </div>
+
+        <!-- Search + Filter Bar -->
+        <div class="opkg-toolbar">
+          <div class="opkg-search-wrap">
+            <input type="text" class="text-input" data-input="opkgSearch"
+              value="${escapeHtml(state.opkgSearch || "")}"
+              placeholder="Search packages (e.g. htop, iperf3, curl, luci-app-)..." />
+            <button class="btn btn-secondary" data-action="opkg-search" ${state.opkgLoading ? "disabled" : ""}>
+              ${state.opkgLoading ? "..." : "Search"}
+            </button>
+          </div>
+          <div class="preset-row" style="margin:0;">
+            ${[
+              { id: "installed", label: "Installed" },
+              { id: "available", label: "Available" },
+              { id: "all", label: "All" }
+            ].map((f) => `
+              <button class="preset-pill ${curFilter === f.id ? "active" : ""}"
+                data-action="opkg-filter" data-filter="${f.id}">
+                ${f.label}
+              </button>
+            `).join("")}
+          </div>
+        </div>
+
+        ${curFilter === "available" && !state.opkgListsUpdated ? `
+          <div class="rf-stat" style="padding:14px;">
+            Package feed lists in <code class="mono">/var/opkg-lists</code> are empty. Unlock Edit Mode and click <strong>Run opkg update</strong> to browse installable packages.
+          </div>
+        ` : displayPkgs.length === 0 ? `
+          <div class="rf-stat" style="padding:14px;">
+            ${state.opkgLoading ? "Querying opkg package database..." : "No matching packages found. Try another search term or switch filter."}
+          </div>
+        ` : `
+          <div class="opkg-list">
+            ${displayPkgs.map((p) => {
+              const isCore = PROTECTED_OPKG_SET.has(p.name);
+              return `
+                <div class="opkg-row">
+                  <div class="opkg-row-info">
+                    <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                      <strong class="mono" style="font-size:0.86rem;">${escapeHtml(p.name)}</strong>
+                      <span class="mono" style="font-size:0.74rem; color:var(--text-muted);">${escapeHtml(p.version || "")}</span>
+                      ${p.installed ? `<span class="qual-badge excellent" style="font-size:0.68rem; padding:2px 7px;">Installed</span>` : ""}
+                    </div>
+                    ${p.desc ? `<div class="card-subtitle" style="font-size:0.76rem; margin-top:2px;">${escapeHtml(p.desc)}</div>` : ""}
+                  </div>
+                  <div style="flex-shrink:0;">
+                    ${p.installed ? (
+                      isCore
+                        ? `<span class="qual-badge good whitespace-nowrap shrink-0" style="font-size:0.72rem;">${ICONS.lock} Core</span>`
+                        : `<button class="btn btn-danger-signal" style="min-height:34px; padding:5px 12px; font-size:0.78rem;"
+                            data-action="opkg-remove" data-pkg="${escapeHtml(p.name)}" ${(locked || state.opkgBusy) ? "disabled" : ""}>
+                            Uninstall
+                          </button>`
+                    ) : `
+                      <button class="btn btn-primary-wifi" style="min-height:34px; padding:5px 12px; font-size:0.78rem;"
+                        data-action="opkg-install" data-pkg="${escapeHtml(p.name)}" ${(locked || state.opkgBusy) ? "disabled" : ""}>
+                        Install
+                      </button>
+                    `}
+                  </div>
+                </div>
+              `;
+            }).join("")}
+          </div>
+        `}
+
+        <!-- Live Console Log Output -->
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <strong style="font-size:0.84rem;">Live Console Output</strong>
+            <button class="icon-btn" style="padding:4px 10px; font-size:0.75rem;" data-action="opkg-clear-log">Clear</button>
+          </div>
+          <pre class="opkg-console mono">${escapeHtml(state.opkgConsoleLog || "Ready. Service & opkg command output will appear here.")}</pre>
+        </div>
+      </article>
+    </div>
+  `;
+}
+
+// ============================================================================
+// Screen 8: Remote Access & Firewall Lifelines (VPN-Agnostic & Strictly Read-Only)
 // ============================================================================
 
 function renderRemoteScreen() {
@@ -2241,13 +2489,14 @@ function renderEndpointModal() {
 // ============================================================================
 
 const NAV_ITEMS = [
-  { id: "home",     label: "Home",            accent: "signal", icon: ICONS.dashboard },
-  { id: "devices",  label: "Devices",         accent: "wifi",   icon: ICONS.devices, badge: () => state.devices.length || null },
-  { id: "wifi",     label: "Wi-Fi",           accent: "wifi",   icon: ICONS.wifi },
-  { id: "cellular", label: "Cellular",        accent: "signal", icon: ICONS.cellular },
-  { id: "sms",      label: "SMS & USSD",      accent: "signal", icon: ICONS.sms, badge: () => state.smsList.filter((s) => s.unread).length || null, alert: true },
-  { id: "system",   label: "System",          accent: "net",    icon: ICONS.system },
-  { id: "remote",   label: "Remote Lifeline", accent: "net",    icon: ICONS.shield }
+  { id: "home",     label: "Home",                accent: "signal", icon: ICONS.dashboard },
+  { id: "devices",  label: "Devices",             accent: "wifi",   icon: ICONS.devices, badge: () => state.devices.length || null },
+  { id: "wifi",     label: "Wi-Fi",               accent: "wifi",   icon: ICONS.wifi },
+  { id: "cellular", label: "Cellular",            accent: "signal", icon: ICONS.cellular },
+  { id: "sms",      label: "SMS & USSD",          accent: "signal", icon: ICONS.sms, badge: () => state.smsList.filter((s) => s.unread).length || null, alert: true },
+  { id: "system",   label: "System",              accent: "net",    icon: ICONS.system },
+  { id: "software", label: "Software & Services", accent: "net",    icon: ICONS.packages },
+  { id: "remote",   label: "Remote Lifeline",     accent: "net",    icon: ICONS.shield }
 ];
 
 export function render() {
@@ -2275,6 +2524,7 @@ export function render() {
     case "cellular": screenHtml = renderCellularScreen(); break;
     case "sms":      screenHtml = renderSmsUssdScreen(); break;
     case "system":   screenHtml = renderSystemScreen(); break;
+    case "software": screenHtml = renderSoftwareScreen(); break;
     case "remote":   screenHtml = renderRemoteScreen(); break;
     default:         screenHtml = renderHomeScreen(); break;
   }
@@ -2362,10 +2612,10 @@ export function render() {
             <span>${item.label.split(" ")[0]}</span>
           </button>
         `).join("")}
-        <button class="tab-btn ${["system", "remote"].includes(state.activeTab) ? "active" : ""}"
-          data-nav="${state.activeTab === "system" ? "remote" : "system"}">
+        <button class="tab-btn ${["system", "software", "remote"].includes(state.activeTab) ? "active" : ""}"
+          data-nav="${state.activeTab === "system" ? "software" : (state.activeTab === "software" ? "remote" : "system")}">
           <div class="tab-icon-wrap">${ICONS.more}</div>
-          <span>${state.activeTab === "remote" ? "Remote" : "System"}</span>
+          <span>${state.activeTab === "software" ? "Software" : (state.activeTab === "remote" ? "Remote" : "System")}</span>
         </button>
       </nav>
     </div>
@@ -2424,7 +2674,7 @@ function setupEvents() {
     const navBtn = e.target.closest("[data-nav]");
     if (navBtn) {
       state.activeTab = navBtn.getAttribute("data-nav");
-      if (state.dataSource === "live" && (state.activeTab === "sms" || state.activeTab === "system")) {
+      if (state.dataSource === "live" && (state.activeTab === "sms" || state.activeTab === "system" || state.activeTab === "software")) {
         refreshTabSpecificLive(state.activeTab);
       }
       render();
@@ -3109,6 +3359,181 @@ function setupEvents() {
         }
       };
       render();
+    } else if (action === "svc-refresh") {
+      await refreshTabSpecificLive("software");
+    } else if (action === "svc-action") {
+      if (!state.editMode) {
+        pushToast("Unlock Edit Mode to control services.");
+        return;
+      }
+      const svc = actionEl.getAttribute("data-svc") || "";
+      const act = actionEl.getAttribute("data-svc-act") || "";
+      if (!svc || !act) return;
+      state.svcBusy = svc;
+      appendOpkgLog(`$ /etc/init.d/${svc} ${act}`);
+      render();
+      if (state.dataSource === "live") {
+        try {
+          const [res] = await ubusBatchCall([{
+            object: "aw1000-svc",
+            method: "svc_action",
+            args: { service: svc, action: act }
+          }], 20000);
+          state.svcBusy = null;
+          if (!res || res.code !== 0 || res.data?.ok === false) {
+            const msg = res?.data?.error || res?.statusText || "Service action failed";
+            appendOpkgLog(`ERROR (${svc} ${act}):`, msg);
+            pushToast(`Service error: ${msg}`);
+          } else {
+            appendOpkgLog(`OK (${svc} ${act}): running=${res.data.running}, enabled=${res.data.enabled}`, res.data.output || "");
+            const idx = (state.svcList || []).findIndex((x) => x.name === svc);
+            if (idx >= 0) {
+              state.svcList[idx].running = Boolean(res.data.running);
+              state.svcList[idx].enabled = Boolean(res.data.enabled);
+            }
+            pushToast(`${svc}: ${act} completed.`);
+          }
+        } catch (err) {
+          state.svcBusy = null;
+          appendOpkgLog(`ERROR (${svc} ${act}):`, err?.message || "Network error");
+          pushToast(`Service error: ${err?.message || "Router unreachable"}`);
+        }
+      } else {
+        state.svcBusy = null;
+        const item = (state.svcList || []).find((x) => x.name === svc);
+        if (item) {
+          if (act === "start" || act === "restart") item.running = true;
+          if (act === "stop") item.running = false;
+        }
+        appendOpkgLog(`OK (Mock): ${svc} ${act}`);
+        pushToast(`${svc}: ${act} (Mock Mode).`);
+      }
+      render();
+    } else if (action === "opkg-filter") {
+      state.opkgFilter = actionEl.getAttribute("data-filter") || "installed";
+      render();
+      if (state.dataSource === "live") {
+        await refreshOpkgListLive();
+      }
+    } else if (action === "opkg-search") {
+      if (state.dataSource === "live") {
+        await refreshOpkgListLive();
+      } else {
+        render();
+      }
+    } else if (action === "opkg-clear-log") {
+      state.opkgConsoleLog = "";
+      render();
+    } else if (action === "opkg-update") {
+      if (!state.editMode) {
+        pushToast("Unlock Edit Mode to run opkg update.");
+        return;
+      }
+      state.opkgBusy = true;
+      appendOpkgLog("$ opkg update");
+      render();
+      if (state.dataSource === "live") {
+        try {
+          const [res] = await ubusBatchCall([{ object: "aw1000-svc", method: "opkg_update", args: {} }], 60000);
+          state.opkgBusy = false;
+          if (!res || res.code !== 0 || !res.data) {
+            const msg = res?.statusText || "opkg update failed";
+            appendOpkgLog("opkg update FAILED:", msg);
+            pushToast(msg);
+          } else {
+            if (res.data.overlay) state.opkgOverlay = res.data.overlay;
+            appendOpkgLog(`opkg update finished (exit ${res.data.exit_code ?? 0}):`, res.data.output || "(no output)");
+            pushToast(res.data.ok ? "opkg package lists updated." : "opkg update returned warnings/errors.");
+            await refreshOpkgListLive();
+          }
+        } catch (err) {
+          state.opkgBusy = false;
+          appendOpkgLog("opkg update ERROR:", err?.message || "Timeout");
+          pushToast(`opkg update error: ${err?.message || "Timeout"}`);
+        }
+      } else {
+        state.opkgBusy = false;
+        state.opkgListsUpdated = true;
+        appendOpkgLog("Downloading package feeds... Updated list of available packages (Mock Mode).");
+        pushToast("opkg lists updated (Mock Mode).");
+      }
+      render();
+    } else if (action === "opkg-install") {
+      if (!state.editMode) return;
+      const pkg = actionEl.getAttribute("data-pkg") || "";
+      if (!pkg) return;
+      state.opkgBusy = true;
+      appendOpkgLog(`$ opkg install ${pkg}`);
+      render();
+      if (state.dataSource === "live") {
+        try {
+          const [res] = await ubusBatchCall([{ object: "aw1000-svc", method: "opkg_install", args: { package: pkg } }], 60000);
+          state.opkgBusy = false;
+          if (!res || res.code !== 0 || res.data?.ok === false) {
+            const msg = res?.data?.error || res?.data?.output || res?.statusText || "Install failed";
+            appendOpkgLog(`opkg install ${pkg} FAILED:`, msg);
+            pushToast(`Install failed: ${pkg}`);
+          } else {
+            if (res.data.overlay) state.opkgOverlay = res.data.overlay;
+            appendOpkgLog(`opkg install ${pkg} OK:`, res.data.output || "Installed.");
+            pushToast(`Installed ${pkg}.`);
+            await refreshOpkgListLive();
+          }
+        } catch (err) {
+          state.opkgBusy = false;
+          appendOpkgLog(`opkg install ${pkg} ERROR:`, err?.message || "Timeout");
+          pushToast(`Install error: ${err?.message || "Timeout"}`);
+        }
+      } else {
+        state.opkgBusy = false;
+        const p = (state.opkgPackages || []).find((x) => x.name === pkg);
+        if (p) p.installed = true;
+        appendOpkgLog(`Installing ${pkg} ... Configuring ${pkg}. (Mock Mode)`);
+        pushToast(`Installed ${pkg} (Mock Mode).`);
+      }
+      render();
+    } else if (action === "opkg-remove") {
+      if (!state.editMode) return;
+      const pkg = actionEl.getAttribute("data-pkg") || "";
+      if (!pkg) return;
+      state.confirmModal = {
+        title: `Uninstall package "${pkg}"?`,
+        impact: `Runs "opkg remove ${pkg}" on the AW1000 router. Core/lifeline packages remain protected.`,
+        lifelineNote: "dropbear SSH, uhttpd, rpcd, netbird, tailscale, firewall & dnsmasq cannot be uninstalled.",
+        onConfirm: async () => {
+          state.opkgBusy = true;
+          appendOpkgLog(`$ opkg remove ${pkg}`);
+          render();
+          if (state.dataSource === "live") {
+            try {
+              const [res] = await ubusBatchCall([{ object: "aw1000-svc", method: "opkg_remove", args: { package: pkg } }], 60000);
+              state.opkgBusy = false;
+              if (!res || res.code !== 0 || res.data?.ok === false) {
+                const msg = res?.data?.error || res?.data?.output || res?.statusText || "Remove failed";
+                appendOpkgLog(`opkg remove ${pkg} FAILED:`, msg);
+                pushToast(`Remove failed: ${pkg}`);
+              } else {
+                if (res.data.overlay) state.opkgOverlay = res.data.overlay;
+                appendOpkgLog(`opkg remove ${pkg} OK:`, res.data.output || "Removed.");
+                pushToast(`Uninstalled ${pkg}.`);
+                await refreshOpkgListLive();
+              }
+            } catch (err) {
+              state.opkgBusy = false;
+              appendOpkgLog(`opkg remove ${pkg} ERROR:`, err?.message || "Timeout");
+              pushToast(`Remove error: ${err?.message || "Timeout"}`);
+            }
+          } else {
+            state.opkgBusy = false;
+            const p = (state.opkgPackages || []).find((x) => x.name === pkg);
+            if (p) p.installed = false;
+            appendOpkgLog(`Removing package ${pkg} from root... (Mock Mode)`);
+            pushToast(`Uninstalled ${pkg} (Mock Mode).`);
+          }
+          render();
+        }
+      };
+      render();
     }
   });
 
@@ -3127,7 +3552,7 @@ function setupEvents() {
       if (btn) btn.disabled = !valid;
       return;
     }
-    if (key === "profileLanInput" || key === "profileVpnInput" || key === "loginUserInput" || key === "loginPassInput" || key === "smsComposeTo" || key === "smsComposeBody" || key === "ussdInput") {
+    if (key === "profileLanInput" || key === "profileVpnInput" || key === "loginUserInput" || key === "loginPassInput" || key === "smsComposeTo" || key === "smsComposeBody" || key === "ussdInput" || key === "opkgSearch") {
       state[key] = e.target.value;
       return;
     }
@@ -3157,7 +3582,62 @@ function setupEvents() {
     }
   });
 
-  document.addEventListener("change", (e) => {
+  document.addEventListener("keydown", async (e) => {
+    if (e.key === "Enter" && e.target.getAttribute && e.target.getAttribute("data-input") === "opkgSearch") {
+      e.preventDefault();
+      if (state.dataSource === "live") {
+        await refreshOpkgListLive();
+      } else {
+        render();
+      }
+    }
+  });
+
+  document.addEventListener("change", async (e) => {
+    const svcBoot = e.target.getAttribute("data-svc-boot");
+    if (svcBoot) {
+      if (!state.editMode) {
+        e.target.checked = !e.target.checked;
+        pushToast("Unlock Edit Mode to change boot startup.");
+        return;
+      }
+      const act = e.target.checked ? "enable" : "disable";
+      state.svcBusy = svcBoot;
+      appendOpkgLog(`$ /etc/init.d/${svcBoot} ${act}`);
+      render();
+      if (state.dataSource === "live") {
+        try {
+          const [res] = await ubusBatchCall([{
+            object: "aw1000-svc",
+            method: "svc_action",
+            args: { service: svcBoot, action: act }
+          }], 15000);
+          state.svcBusy = null;
+          if (!res || res.code !== 0 || res.data?.ok === false) {
+            const msg = res?.data?.error || res?.statusText || "Boot toggle failed";
+            appendOpkgLog(`ERROR (${svcBoot} ${act}):`, msg);
+            pushToast(`Boot toggle failed: ${msg}`);
+          } else {
+            const idx = (state.svcList || []).findIndex((x) => x.name === svcBoot);
+            if (idx >= 0) state.svcList[idx].enabled = Boolean(res.data.enabled);
+            appendOpkgLog(`OK (${svcBoot} ${act}): enabled=${res.data.enabled}`);
+            pushToast(`${svcBoot}: boot auto-start ${res.data.enabled ? "enabled" : "disabled"}.`);
+          }
+        } catch (err) {
+          state.svcBusy = null;
+          appendOpkgLog(`ERROR (${svcBoot} ${act}):`, err?.message || "Network error");
+          pushToast(`Boot toggle error: ${err?.message || "Router unreachable"}`);
+        }
+      } else {
+        state.svcBusy = null;
+        const item = (state.svcList || []).find((x) => x.name === svcBoot);
+        if (item) item.enabled = e.target.checked;
+        appendOpkgLog(`OK (Mock): ${svcBoot} ${act}`);
+        pushToast(`${svcBoot}: boot ${act}d (Mock Mode).`);
+      }
+      render();
+      return;
+    }
     const wifiKey = e.target.getAttribute("data-wifi");
     if (wifiKey) {
       const field = e.target.getAttribute("data-field");
@@ -3468,13 +3948,67 @@ async function refreshTabSpecificLive(tab) {
         };
       }
       render();
+    } else if (tab === "software") {
+      state.svcLoading = true;
+      state.opkgLoading = true;
+      render();
+      const res = await ubusBatchCall([
+        { object: "aw1000-svc", method: "svc_list" },
+        { object: "aw1000-svc", method: "opkg_list", args: { query: state.opkgSearch || "", filter: state.opkgFilter || "installed" } }
+      ], 15000);
+      state.svcLoading = false;
+      state.opkgLoading = false;
+      const svcData = res?.[0]?.data;
+      const opkgData = res?.[1]?.data;
+      if (svcData && svcData.ok && Array.isArray(svcData.services)) {
+        state.svcList = svcData.services;
+      }
+      if (opkgData && opkgData.ok) {
+        if (opkgData.overlay) state.opkgOverlay = opkgData.overlay;
+        state.opkgListsUpdated = Boolean(opkgData.lists_updated);
+        state.opkgInstalledCount = Number(opkgData.total_installed) || 0;
+        state.opkgAvailableCount = Number(opkgData.total_available) || 0;
+        state.opkgPackages = Array.isArray(opkgData.packages) ? opkgData.packages : [];
+      }
+      render();
     }
   } catch (err) {
+    state.svcLoading = false;
+    state.opkgLoading = false;
     if (tab === "sms") {
       state.smsError = `SMS refresh error: ${err?.message || "Router unreachable"}`;
       render();
+    } else if (tab === "software") {
+      appendOpkgLog("Refresh error:", err?.message || "Router unreachable");
+      render();
     }
   }
+}
+
+async function refreshOpkgListLive() {
+  if (state.dataSource !== "live") return;
+  state.opkgLoading = true;
+  render();
+  try {
+    const [res] = await ubusBatchCall([{
+      object: "aw1000-svc",
+      method: "opkg_list",
+      args: { query: state.opkgSearch || "", filter: state.opkgFilter || "installed" }
+    }], 15000);
+    state.opkgLoading = false;
+    const d = res?.data;
+    if (d && d.ok) {
+      if (d.overlay) state.opkgOverlay = d.overlay;
+      state.opkgListsUpdated = Boolean(d.lists_updated);
+      state.opkgInstalledCount = Number(d.total_installed) || 0;
+      state.opkgAvailableCount = Number(d.total_available) || 0;
+      state.opkgPackages = Array.isArray(d.packages) ? d.packages : [];
+    }
+  } catch (err) {
+    state.opkgLoading = false;
+    appendOpkgLog("opkg_list error:", err?.message || "Timeout");
+  }
+  render();
 }
 
 async function pollTick(forceExtended = false) {

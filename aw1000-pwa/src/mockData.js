@@ -162,7 +162,13 @@ export function getEmptyLiveSnapshot(conn) {
       { name: "uhttpd (:80 → :443 HTTPS)", status: "running", protected: false, note: "redirect_https=1, rfc1918_filter=1" },
       { name: "rpcd (ubus JSON-RPC)", status: "running", protected: false, note: "Dedicated 'pwa' ACL user" }
     ],
-    logs: []
+    logs: [],
+    svcList: [],
+    opkgOverlay: { total_kb: 0, used_kb: 0, avail_kb: 0, avail_mb: 0 },
+    opkgListsUpdated: false,
+    opkgInstalledCount: 0,
+    opkgAvailableCount: 0,
+    opkgPackages: []
   };
 }
 
@@ -347,6 +353,25 @@ export function getMockSnapshot(conn) {
     logs: [
       "Nov 19 04:00:01 AW1000 daemon.notice netifd: Interface 'wan' (ccmni2) 5G-NR carrier active",
       "Nov 19 03:58:12 AW1000 user.info firewall: /etc/firewall.user raw PREROUTING drop rules active (23,17171,8000,8080,3517,10240)"
+    ],
+    svcList: [
+      { name: "dropbear", label: "Dropbear SSH (:22)", note: "Lifeline #1 — Protected read-only SSH access", installed: true, enabled: true, running: true, protected: true },
+      { name: "netbird", label: "NetBird VPN (wt0)", note: "Kernel WireGuard overlay remote access", installed: true, enabled: true, running: true, protected: false },
+      { name: "tailscale", label: "Tailscale VPN", note: "Secondary mesh VPN overlay daemon", installed: true, enabled: false, running: false, protected: false },
+      { name: "adguardhome", label: "AdGuard Home (:3000)", note: "Network-wide DNS ad-blocker (127.0.0.1:5353)", installed: true, enabled: true, running: true, protected: false },
+      { name: "firewall", label: "OpenWrt Firewall (fw3)", note: "NAT, WAN/LAN zones & /etc/firewall.user rules", installed: true, enabled: true, running: true, protected: false },
+      { name: "dnsmasq", label: "Dnsmasq DHCP & DNS", note: "LAN DHCP server & local DNS forwarder (:53)", installed: true, enabled: true, running: true, protected: false }
+    ],
+    opkgOverlay: { total_kb: 13841203, used_kb: 184320, avail_kb: 12950000, avail_mb: 12646 },
+    opkgListsUpdated: true,
+    opkgInstalledCount: 889,
+    opkgAvailableCount: 4120,
+    opkgPackages: [
+      { name: "curl", version: "7.66.0-3", installed: true, desc: "A client-side URL transfer utility" },
+      { name: "htop", version: "2.2.0-4", installed: false, desc: "Interactive process viewer for Linux" },
+      { name: "iperf3", version: "3.7-1", installed: false, desc: "Internet Protocol bandwidth measuring tool" },
+      { name: "luci-app-3ginfo-lite", version: "1.0.75", installed: true, desc: "LuCI support for 3ginfo-lite cellular status" },
+      { name: "nano", version: "5.2-1", installed: false, desc: "Small and friendly text editor" }
     ]
   };
 }
@@ -526,6 +551,13 @@ export function createInitialState() {
     ussdResult: initialSource === "live" ? "Dial a USSD code to query your SIM carrier." : "Demo: 5G Ultra Data Active · 184.2 GB remaining.",
     smsComposeTo: "",
     smsComposeBody: "",
+    svcLoading: false,
+    svcBusy: null,
+    opkgLoading: false,
+    opkgBusy: false,
+    opkgFilter: "installed",
+    opkgSearch: "",
+    opkgConsoleLog: "",
     ...base
   };
 }

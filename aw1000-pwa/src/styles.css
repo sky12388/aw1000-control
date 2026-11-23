@@ -1631,3 +1631,158 @@ body.modal-open .pulse-dot {
   from { opacity: 0; }
   to   { opacity: 1; }
 }
+
+/* ==========================================================================
+   Software & Services Tab (Service Control Cards + opkg Package Manager)
+   ========================================================================== */
+
+.svc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 14px;
+}
+
+.svc-card {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  transition: border-color var(--transition-spring), transform var(--transition-spring);
+}
+
+.svc-card.is-protected {
+  border-color: rgba(20, 200, 200, 0.35);
+}
+
+.svc-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.svc-boot-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 11px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  font-size: 0.82rem;
+}
+
+.svc-boot-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 650;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.svc-boot-toggle input[type="checkbox"] {
+  width: 17px;
+  height: 17px;
+  accent-color: #2F7BFF;
+  cursor: pointer;
+}
+
+.svc-boot-toggle input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.svc-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.svc-actions .btn {
+  flex: 1 1 auto;
+  min-height: 36px;
+  padding: 6px 10px;
+  font-size: 0.8rem;
+}
+
+.opkg-meter-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 11px 14px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+}
+
+.opkg-meter-bar {
+  width: 100%;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--border-strong);
+  overflow: hidden;
+}
+
+.opkg-meter-fill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--grad-wifi);
+  transition: width 260ms ease;
+}
+
+.opkg-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.opkg-search-wrap {
+  display: flex;
+  gap: 8px;
+  flex: 1 1 240px;
+}
+
+.opkg-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 380px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.opkg-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 13px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: 13px;
+}
+
+.opkg-row-info {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.opkg-console {
+  background: #0B1020;
+  color: #E2E8F0;
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  padding: 12px 14px;
+  font-size: 0.77rem;
+  line-height: 1.5;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

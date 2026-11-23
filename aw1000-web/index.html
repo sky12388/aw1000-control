@@ -24,6 +24,7 @@
       </a>
       <nav class="nav-links">
         <a class="hide-sm" href="#features">Features</a>
+        <a class="hide-sm" href="#rgb-luci">RGB LuCI</a>
         <a href="#downloads">Downloads</a>
         <a href="#install">Install</a>
         <a href="#support">Support</a>
@@ -43,10 +44,12 @@
         <div class="eyebrow">OpenWrt · Fibocom FG360 · MT7915 Dual-Band</div>
         <h1>Supercharged 5G Control for Your <span class="text-rgb">AW1000 Ultra</span></h1>
         <p class="hero-desc">
-          A blazing-fast 42 KB Progressive Web App hosted directly on your router plus a 644 KB native
-          Android companion APK. Monitor 5G/LTE Carrier Aggregation, align antennas by ear, lock 5G/4G bands
-          &amp; PCI cells, customize front-panel LED FX &amp; Night Mode, and manage TTL, IMEI, Wi-Fi, SMS,
-          and MAC ACLs — locally on LAN or remotely over NetBird, Tailscale, or WireGuard.
+          A blazing-fast 47 KB Progressive Web App hosted directly on your router plus a 645 KB native
+          Android companion APK — now with a full <strong>Software &amp; Services</strong> tab
+          (<code class="mono">init.d</code> + <code class="mono">opkg</code>) and an optional
+          <strong>RGB Dark/Light LuCI Theme</strong>. Monitor 5G/LTE Carrier Aggregation, align antennas by ear,
+          lock 5G/4G bands &amp; PCI cells, customize front-panel LED FX &amp; Night Mode, and manage services,
+          packages, TTL, IMEI, Wi-Fi, SMS, and MAC ACLs — locally on LAN or remotely over NetBird, Tailscale, or WireGuard.
         </p>
         <div class="hero-actions">
           <a class="btn btn-green" href="https://github.com/sky12388/aw1000-control/releases/download/v1.0.11/AW1000-Control-v1.0.11.apk">
@@ -57,13 +60,13 @@
           </a>
         </div>
         <div class="hero-stats">
-          <span><strong>33.5 KB</strong> gzipped PWA</span>
+          <span><strong>47.4 KB</strong> gzipped PWA</span>
           <span>·</span>
           <span><strong>645 KB</strong> signed APK</span>
           <span>·</span>
-          <span><strong>Read-Only</strong> by default</span>
+          <span><strong>RGB LuCI</strong> Dark/Light</span>
           <span>·</span>
-          <span><strong>Zero</strong> cloud relays</span>
+          <span><strong>Read-Only</strong> by default</span>
         </div>
       </div>
 
@@ -133,19 +136,71 @@
           <p>1-tap Master LED ON/OFF stealth toggle plus 5 front-panel modes: Stock Status, Knight Rider Running Chase, Dancing Wave, and a live 5G Traffic VU-Meter.</p>
         </article>
         <article class="card">
-          <div class="card-top-bar wifi"></div>
-          <h3>IMEI, TTL &amp; MAC Anti-Lockout</h3>
-          <p>15-digit IMEI Luhn validator &amp; generator, persistent IPv4/IPv6 TTL/HL spoofing presets, and 1-tap Wi-Fi MAC Blacklist with Admin Anti-Lockout Guard.</p>
+          <div class="card-top-bar net"></div>
+          <h3>Software &amp; Services (<code class="mono">init.d</code> + <code class="mono">opkg</code>)</h3>
+          <p>Toggle boot startup and Start/Stop/Restart <code class="mono">netbird</code>, <code class="mono">tailscale</code>, <code class="mono">adguardhome</code>, <code class="mono">firewall</code>, and <code class="mono">dnsmasq</code> — plus live <code class="mono">opkg</code> search, install/uninstall, console output, and <code class="mono">/overlay</code> free-space health.</p>
         </article>
         <article class="card">
-          <div class="card-top-bar net"></div>
-          <h3>SIM SMS Inbox &amp; APN Control</h3>
-          <p>Read, send, and delete SIM/ME SMS directly from the dashboard, switch IPv4/IPv6 APN profiles, and monitor live WAN download/upload throughput.</p>
+          <div class="card-top-bar wifi"></div>
+          <h3>IMEI, TTL, SIM SMS &amp; MAC Guard</h3>
+          <p>15-digit IMEI Luhn validator &amp; generator, persistent IPv4/IPv6 TTL/HL spoofing, SIM/ME SMS inbox &amp; send/delete, APN switcher, and Wi-Fi MAC ACLs with Admin Anti-Lockout Guard.</p>
         </article>
         <article class="card">
           <div class="card-top-bar signal"></div>
-          <h3>Read-Only Guard &amp; Backups</h3>
-          <p>Read-only by default. Write actions require rpcd login + Impact Confirmation Sheets and never touch SSH, NetBird, Tailscale, or <code class="mono">/etc/firewall.user</code>.</p>
+          <h3>Read-Only Guard &amp; Lifeline Lock</h3>
+          <p>Read-only by default. Write actions require rpcd login + Edit Mode Unlock, while <code class="mono">dropbear</code> SSH :22 and core packages stay strictly protected under Lifeline Guard.</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- RGB LuCI UI/UX Theme Showcase -->
+    <section id="rgb-luci" class="section">
+      <div class="section-head">
+        <h2>RGB Ultra Theme for OpenWrt LuCI</h2>
+        <p>Prefer the full OpenWrt LuCI interface alongside the PWA? Our additive <code class="mono">rgb-ultra.css</code> theme transforms stock Bootstrap LuCI into a neon-accented Dark &amp; Light dashboard with zero broken routes.</p>
+      </div>
+
+      <div class="grid-2">
+        <article class="card">
+          <div class="card-top-bar signal"></div>
+          <span class="badge" style="width:fit-content;margin-bottom:6px;">Additive CSS · Zero Backend Changes</span>
+          <h3>Dark / Light Mode + WCAG Contrast Guard</h3>
+          <p>
+            Boots into sleek <strong>OLED Dark Mode</strong> by default with a persistent top-bar
+            <code class="mono">Dark / Light</code> toggle (<code class="mono">localStorage['rgb-theme']</code>).
+            Built-in contrast enforcement dynamically audits AJAX-injected modem panels so every label, table,
+            NTP list, and form control stays crisp and readable (verified <strong>0</strong> contrast errors across Overview, System, Network &amp; Cellular views).
+          </p>
+          <div class="mini-metrics tabular" style="margin-top:6px;">
+            <div class="mini-stat">
+              <span>Theme Engine</span>
+              <strong>rgb-ultra.css</strong>
+            </div>
+            <div class="mini-stat">
+              <span>Contrast Audit</span>
+              <strong style="color:#00E676;">0 Errors</strong>
+            </div>
+            <div class="mini-stat">
+              <span>Base cascade.css</span>
+              <strong>100% Untouched</strong>
+            </div>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="card-top-bar net"></div>
+          <span class="badge" style="width:fit-content;margin-bottom:6px;">Animated Neon Accents · Factory-Reset Safe</span>
+          <h3>Normalized Cellular View &amp; 1-Command Restore</h3>
+          <p>
+            Features animated RGB neon card borders, gradient headings, glowing tab pills, reduced-motion
+            support, and a cleaned-up <strong>Cellular Information</strong> modem view with direct
+            <code class="mono">AT+GTACT</code> band-lock verification. Backed up to USB with SHA-256 manifests
+            for instant recovery after any reset.
+          </p>
+          <div class="code-box" style="margin-top:6px;">
+            <pre id="rgbLuciRestoreCmd" class="mono">sh /mnt/sda1/LUCI_UI_BACKUP/restore.sh</pre>
+            <button class="copy-btn" data-copy-target="rgbLuciRestoreCmd">Copy</button>
+          </div>
         </article>
       </div>
     </section>

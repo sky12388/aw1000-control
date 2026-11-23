@@ -1,0 +1,462 @@
+#!/bin/sh
+# ==============================================================================
+# /usr/libexec/rpcd/aw1000-svc — Software & Services rpcd plugin for AW1000 PWA
+#
+# LIFELINE GUARD:
+#   - dropbear (SSH :22) is strictly READ-ONLY / PROTECTED (cannot stop/disable/restart).
+#   - Only allowlisted init.d services (netbird, tailscale, adguardhome, firewall, dnsmasq)
+#     may be controlled, and only when authenticated via rpcd write ACL (Edit Mode Unlocked).
+#   - opkg install/remove validates package names strictly and blocks removal of
+#     critical/lifeline packages; checks /overlay free space before installing.
+# ==============================================================================
+
+case "$1" in
+	list)
+		cat <<'EOF'
+{
+  "svc_list": {},
+  "svc_action": {
+    "service": "netbird|tailscale|adguardhome|firewall|dnsmasq",
+    "action": "start|stop|restart|enable|disable"
+  },
+  "opkg_list": {
+    "query": "string",
+    "filter": "installed|available|all"
+  },
+  "opkg_update": {},
+  "opkg_install": {
+    "package": "string"
+  },
+  "opkg_remove": {
+    "package": "string"
+  }
+}
+EOF
+		;;
+
+	call)
+		case "$2" in
+			svc_list)
+				/usr/bin/lua - <<'LUA'
+local json = require("luci.jsonc")
+
+local function exec_out(cmd)
+	local p = io.popen(cmd .. " 2>/dev/null")
+	if not p then return "" end
+	local s = p:read("*a") or ""
+	p:close()
+	return s
+end
+
+local function file_exists(path)
+	local f = io.open(path, "r")
+	if f then f:close(); return true end
+	return false
+end
+
+local function is_enabled(name)
+	local rc = os.execute("/etc/init.d/" .. name .. " enabled >/dev/null 2>&1")
+	if rc == 0 or rc == true then return true end
+	local out = exec_out("ls /etc/rc.d/S*" .. name .. " 2>/dev/null")
+	return out:match("%S") ~= nil
+end
+
+local function is_running(name, proc_pat)
+	if name == "firewall" then
+		local out = exec_out("iptables -S 2>/dev/null")
+		return out:find("zone_lan_input", 1, true) ~= nil or out:find("zone_wan_input", 1, true) ~= nil
+	end
+	if proc_pat and proc_pat ~= "" then
+		local out = exec_out("pgrep -f '" .. proc_pat .. "' 2>/dev/null")
+		if out:match("%d+") then return true end
+	end
+	local out = exec_out("pidof " .. name .. " 2>/dev/null")
+	return out:match("%d+") ~= nil
+end
+
+local roster = {
+	{ name = "dropbear",    label = "Dropbear SSH (:22)",        note = "Lifeline #1 — Protected read-only SSH access",      proc = "dropbear",    protected = true  },
+	{ name = "netbird",     label = "NetBird VPN (wt0)",         note = "Kernel WireGuard overlay remote access",            proc = "/netbird",    protected = false },
+	{ name = "tailscale",   label = "Tailscale VPN",             note = "Secondary mesh VPN overlay daemon",                 proc = "tailscaled",  protected = false },
+	{ name = "adguardhome", label = "AdGuard Home (:3000)",      note = "Network-wide DNS ad-blocker (127.0.0.1:5353)",      proc = "AdGuardHome", protected = false },
+	{ name = "firewall",    label = "OpenWrt Firewall (fw3)",    note = "NAT, WAN/LAN zones & /etc/firewall.user rules",     proc = "",            protected = false },
+	{ name = "dnsmasq",     label = "Dnsmasq DHCP & DNS",        note = "LAN DHCP server & local DNS forwarder (:53)",       proc = "dnsmasq",     protected = false }
+}
+
+local services = {}
+for _, s in ipairs(roster) do
+	local init_path = "/etc/init.d/" .. s.name
+	local inst = file_exists(init_path)
+	table.insert(services, {
+		name = s.name,
+		label = s.label,
+		note = s.note,
+		installed = inst,
+		enabled = inst and is_enabled(s.name) or false,
+		running = inst and is_running(s.name, s.proc) or false,
+		protected = s.protected
+	})
+end
+
+io.write(json.stringify({ ok = true, services = services }) .. "\n")
+LUA
+				;;
+
+			svc_action)
+				read -r input
+				INPUT_JSON="$input" /usr/bin/lua - <<'LUA'
+local json = require("luci.jsonc")
+local req = json.parse(os.getenv("INPUT_JSON") or "{}") or {}
+local svc = tostring(req.service or "")
+local act = tostring(req.action or "")
+
+local ALLOWED_SVC = {
+	netbird = "/netbird",
+	tailscale = "tailscaled",
+	adguardhome = "AdGuardHome",
+	firewall = "",
+	dnsmasq = "dnsmasq"
+}
+local ALLOWED_ACT = {
+	start = true,
+	stop = true,
+	restart = true,
+	enable = true,
+	disable = true
+}
+
+if svc == "dropbear" then
+	io.write(json.stringify({ ok = false, error = "Protected by Lifeline Guard: dropbear SSH cannot be modified" }) .. "\n")
+	os.exit(0)
+end
+
+if not ALLOWED_SVC[svc] then
+	io.write(json.stringify({ ok = false, error = "Service not allowed: " .. svc }) .. "\n")
+	os.exit(0)
+end
+
+if not ALLOWED_ACT[act] then
+	io.write(json.stringify({ ok = false, error = "Action not allowed: " .. act }) .. "\n")
+	os.exit(0)
+end
+
+local init_path = "/etc/init.d/" .. svc
+local f = io.open(init_path, "r")
+if not f then
+	io.write(json.stringify({ ok = false, error = "Init script not installed: " .. init_path }) .. "\n")
+	os.exit(0)
+end
+f:close()
+
+local p = io.popen(init_path .. " " .. act .. " 2>&1")
+local out = p and p:read("*a") or ""
+local ok_close, _, code = false, nil, 0
+if p then
+	ok_close, _, code = p:close()
+end
+if type(ok_close) == "number" then code = ok_close end
+if act == "start" or act == "stop" or act == "restart" then
+	os.execute("sleep 1")
+end
+
+local function exec_out(cmd)
+	local h = io.popen(cmd .. " 2>/dev/null")
+	if not h then return "" end
+	local s = h:read("*a") or ""
+	h:close()
+	return s
+end
+
+local rc_en = os.execute(init_path .. " enabled >/dev/null 2>&1")
+local enabled = (rc_en == 0 or rc_en == true) or (exec_out("ls /etc/rc.d/S*" .. svc .. " 2>/dev/null"):match("%S") ~= nil)
+local running = false
+if svc == "firewall" then
+	local fw = exec_out("iptables -S 2>/dev/null")
+	running = fw:find("zone_lan_input", 1, true) ~= nil or fw:find("zone_wan_input", 1, true) ~= nil
+else
+	local pat = ALLOWED_SVC[svc]
+	running = (exec_out("pgrep -f '" .. pat .. "' 2>/dev/null"):match("%d+") ~= nil)
+		or (exec_out("pidof " .. svc .. " 2>/dev/null"):match("%d+") ~= nil)
+end
+
+if #out > 2000 then out = out:sub(1, 2000) .. "\n...(truncated)" end
+
+io.write(json.stringify({
+	ok = true,
+	service = svc,
+	action = act,
+	running = running,
+	enabled = enabled,
+	exit_code = tonumber(code) or 0,
+	output = out
+}) .. "\n")
+LUA
+				;;
+
+			opkg_list)
+				read -r input
+				INPUT_JSON="$input" /usr/bin/lua - <<'LUA'
+local json = require("luci.jsonc")
+local req = json.parse(os.getenv("INPUT_JSON") or "{}") or {}
+local query = tostring(req.query or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+local filter = tostring(req.filter or "installed"):lower()
+if filter ~= "installed" and filter ~= "available" and filter ~= "all" then
+	filter = "installed"
+end
+
+local function get_overlay()
+	local p = io.popen("df -k /overlay 2>/dev/null")
+	local total_kb, used_kb, avail_kb = 0, 0, 0
+	if p then
+		p:read("*l")
+		local line = p:read("*l") or ""
+		p:close()
+		local t, u, a = line:match("%S+%s+(%d+)%s+(%d+)%s+(%d+)")
+		total_kb = tonumber(t) or 0
+		used_kb = tonumber(u) or 0
+		avail_kb = tonumber(a) or 0
+	end
+	return {
+		total_kb = total_kb,
+		used_kb = used_kb,
+		avail_kb = avail_kb,
+		avail_mb = math.floor(avail_kb / 1024 + 0.5)
+	}
+end
+
+local installed_map = {}
+local installed_list = {}
+local p_inst = io.popen("opkg list-installed 2>/dev/null")
+if p_inst then
+	for line in p_inst:lines() do
+		local name, ver = line:match("^([^%s]+)%s*%-%s*(.+)$")
+		if name then
+			installed_map[name] = ver or ""
+			table.insert(installed_list, { name = name, version = ver or "", installed = true, desc = "" })
+		end
+	end
+	p_inst:close()
+end
+
+local lists_updated = false
+local p_ls = io.popen("ls -1 /var/opkg-lists 2>/dev/null | head -n 1")
+if p_ls then
+	local first = p_ls:read("*l")
+	p_ls:close()
+	if first and first ~= "" then lists_updated = true end
+end
+
+local results = {}
+local total_available = 0
+local limit = 120
+
+if filter == "installed" then
+	for _, pkg in ipairs(installed_list) do
+		if query == "" or pkg.name:lower():find(query, 1, true) then
+			if #results < limit then
+				table.insert(results, pkg)
+			end
+		end
+	end
+else
+	if lists_updated then
+		local p_av = io.popen("opkg list 2>/dev/null")
+		if p_av then
+			for line in p_av:lines() do
+				local name, rest = line:match("^([A-Za-z0-9._+-]+)%s*%-%s*(.+)$")
+				if name then
+					local ver, desc = rest:match("^([^%s]+)%s*%-%s*(.*)$")
+					if not ver then ver = rest; desc = "" end
+					total_available = total_available + 1
+					local is_inst = installed_map[name] ~= nil
+					local match_filter = (filter == "all") or (filter == "available" and not is_inst)
+					if match_filter then
+						local match_q = (query == "")
+							or name:lower():find(query, 1, true)
+							or (desc and desc:lower():find(query, 1, true))
+						if match_q and #results < limit then
+							table.insert(results, {
+								name = name,
+								version = is_inst and installed_map[name] or ver,
+								installed = is_inst,
+								desc = (desc or ""):sub(1, 120)
+							})
+						end
+					end
+				end
+			end
+			p_av:close()
+		end
+	elseif filter == "all" then
+		for _, pkg in ipairs(installed_list) do
+			if query == "" or pkg.name:lower():find(query, 1, true) then
+				if #results < limit then
+					table.insert(results, pkg)
+				end
+			end
+		end
+	end
+end
+
+io.write(json.stringify({
+	ok = true,
+	overlay = get_overlay(),
+	lists_updated = lists_updated,
+	total_installed = #installed_list,
+	total_available = total_available,
+	filter = filter,
+	query = query,
+	truncated = (#results >= limit),
+	packages = results
+}) .. "\n")
+LUA
+				;;
+
+			opkg_update)
+				/usr/bin/lua - <<'LUA'
+local json = require("luci.jsonc")
+
+local function get_overlay()
+	local p = io.popen("df -k /overlay 2>/dev/null")
+	local total_kb, used_kb, avail_kb = 0, 0, 0
+	if p then
+		p:read("*l")
+		local line = p:read("*l") or ""
+		p:close()
+		local t, u, a = line:match("%S+%s+(%d+)%s+(%d+)%s+(%d+)")
+		total_kb = tonumber(t) or 0
+		used_kb = tonumber(u) or 0
+		avail_kb = tonumber(a) or 0
+	end
+	return { total_kb = total_kb, used_kb = used_kb, avail_kb = avail_kb, avail_mb = math.floor(avail_kb / 1024 + 0.5) }
+end
+
+local p = io.popen("opkg update 2>&1; echo __EXIT__$?")
+local raw = p and p:read("*a") or ""
+if p then p:close() end
+local code = tonumber(raw:match("__EXIT__(%d+)")) or 1
+local out = raw:gsub("__EXIT__%d+%s*$", "")
+if #out > 6000 then out = out:sub(1, 6000) .. "\n...(truncated)" end
+
+io.write(json.stringify({
+	ok = (code == 0),
+	exit_code = code,
+	output = out,
+	overlay = get_overlay()
+}) .. "\n")
+LUA
+				;;
+
+			opkg_install)
+				read -r input
+				INPUT_JSON="$input" /usr/bin/lua - <<'LUA'
+local json = require("luci.jsonc")
+local req = json.parse(os.getenv("INPUT_JSON") or "{}") or {}
+local pkg = tostring(req.package or ""):gsub("^%s+", ""):gsub("%s+$", "")
+
+if not pkg:match("^[A-Za-z0-9._+-]+$") then
+	io.write(json.stringify({ ok = false, error = "Invalid package name" }) .. "\n")
+	os.exit(0)
+end
+
+local function get_overlay()
+	local p = io.popen("df -k /overlay 2>/dev/null")
+	local total_kb, used_kb, avail_kb = 0, 0, 0
+	if p then
+		p:read("*l")
+		local line = p:read("*l") or ""
+		p:close()
+		local t, u, a = line:match("%S+%s+(%d+)%s+(%d+)%s+(%d+)")
+		total_kb = tonumber(t) or 0
+		used_kb = tonumber(u) or 0
+		avail_kb = tonumber(a) or 0
+	end
+	return { total_kb = total_kb, used_kb = used_kb, avail_kb = avail_kb, avail_mb = math.floor(avail_kb / 1024 + 0.5) }
+end
+
+local ov = get_overlay()
+if ov.avail_kb < 2048 then
+	io.write(json.stringify({
+		ok = false,
+		package = pkg,
+		error = "Insufficient /overlay free space (" .. tostring(ov.avail_kb) .. " KB available; need >= 2048 KB)",
+		overlay = ov
+	}) .. "\n")
+	os.exit(0)
+end
+
+local p = io.popen("opkg install '" .. pkg .. "' 2>&1; echo __EXIT__$?")
+local raw = p and p:read("*a") or ""
+if p then p:close() end
+local code = tonumber(raw:match("__EXIT__(%d+)")) or 1
+local out = raw:gsub("__EXIT__%d+%s*$", "")
+if #out > 6000 then out = out:sub(1, 6000) .. "\n...(truncated)" end
+
+io.write(json.stringify({
+	ok = (code == 0),
+	package = pkg,
+	exit_code = code,
+	output = out,
+	overlay = get_overlay()
+}) .. "\n")
+LUA
+				;;
+
+			opkg_remove)
+				read -r input
+				INPUT_JSON="$input" /usr/bin/lua - <<'LUA'
+local json = require("luci.jsonc")
+local req = json.parse(os.getenv("INPUT_JSON") or "{}") or {}
+local pkg = tostring(req.package or ""):gsub("^%s+", ""):gsub("%s+$", "")
+
+if not pkg:match("^[A-Za-z0-9._+-]+$") then
+	io.write(json.stringify({ ok = false, error = "Invalid package name" }) .. "\n")
+	os.exit(0)
+end
+
+local PROTECTED_PKGS = {
+	dropbear = true, uhttpd = true, rpcd = true, ubus = true, ubusd = true,
+	busybox = true, libc = true, ["base-files"] = true, netifd = true, procd = true,
+	opkg = true, firewall = true, dnsmasq = true, netbird = true, tailscale = true,
+	["aw1000-control"] = true
+}
+
+if PROTECTED_PKGS[pkg] then
+	io.write(json.stringify({ ok = false, package = pkg, error = "Protected by Lifeline Guard: cannot remove core package '" .. pkg .. "'" }) .. "\n")
+	os.exit(0)
+end
+
+local function get_overlay()
+	local p = io.popen("df -k /overlay 2>/dev/null")
+	local total_kb, used_kb, avail_kb = 0, 0, 0
+	if p then
+		p:read("*l")
+		local line = p:read("*l") or ""
+		p:close()
+		local t, u, a = line:match("%S+%s+(%d+)%s+(%d+)%s+(%d+)")
+		total_kb = tonumber(t) or 0
+		used_kb = tonumber(u) or 0
+		avail_kb = tonumber(a) or 0
+	end
+	return { total_kb = total_kb, used_kb = used_kb, avail_kb = avail_kb, avail_mb = math.floor(avail_kb / 1024 + 0.5) }
+end
+
+local p = io.popen("opkg remove '" .. pkg .. "' 2>&1; echo __EXIT__$?")
+local raw = p and p:read("*a") or ""
+if p then p:close() end
+local code = tonumber(raw:match("__EXIT__(%d+)")) or 1
+local out = raw:gsub("__EXIT__%d+%s*$", "")
+if #out > 6000 then out = out:sub(1, 6000) .. "\n...(truncated)" end
+
+io.write(json.stringify({
+	ok = (code == 0),
+	package = pkg,
+	exit_code = code,
+	output = out,
+	overlay = get_overlay()
+}) .. "\n")
+LUA
+				;;
+		esac
+		;;
+esac
