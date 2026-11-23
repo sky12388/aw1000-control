@@ -248,6 +248,25 @@ function fx.heartbeat(cycles)
 	end
 end
 
+local hb3_cidx = 0
+function fx.heartbeat3(cycles)
+	local colors = { "green", "amber", "red" }
+	for _ = 1, (cycles or 1) do
+		hb3_cidx = (hb3_cidx % #colors) + 1
+		local col = colors[hb3_cidx]
+		for slot = 1, 6 do
+			for b = 1, 3 do
+				all_off()
+				set_slot(slot, col)
+				msleep(130)
+				all_off()
+				msleep(120)
+			end
+			msleep(240)
+		end
+	end
+end
+
 function fx.dance(steps)
 	local palette = { "green", "amber", "red", "green", "red", "amber" }
 	for step = 1, (steps or 12) do
@@ -352,7 +371,7 @@ function fx.guardian(ticks)
 	end
 end
 
-local mix_order = { "knight", "comet", "ripple", "matrix", "stack", "dance", "strobe", "heartbeat" }
+local mix_order = { "knight", "comet", "ripple", "matrix", "stack", "dance", "strobe", "heartbeat", "heartbeat3" }
 
 if mode == "mix" then
 	local idx = 1
@@ -387,7 +406,7 @@ LUA
 
 is_valid_mode() {
 	case "$1" in
-		stock|off|knight|comet|ripple|strobe|matrix|stack|heartbeat|traffic|signal|guardian|mix|random|dance) return 0 ;;
+		stock|off|knight|comet|ripple|strobe|matrix|stack|heartbeat|heartbeat3|traffic|signal|guardian|mix|random|dance) return 0 ;;
 		*) return 1 ;;
 	esac
 }
