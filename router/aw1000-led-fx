@@ -267,6 +267,22 @@ function fx.heartbeat3(cycles)
 	end
 end
 
+function fx.wingtip(cycles)
+	for _ = 1, (cycles or 2) do
+		-- Edge 1 (Status): double-beat Green ("lub-dub")
+		all_off()
+		set_slot(1, "green"); msleep(130)
+		all_off();            msleep(120)
+		set_slot(1, "green"); msleep(130)
+		all_off();            msleep(520)
+		-- Edge 6 (Phone): double-beat Red ("lub-dub")
+		set_slot(6, "red");   msleep(130)
+		all_off();            msleep(120)
+		set_slot(6, "red");   msleep(130)
+		all_off();            msleep(650)
+	end
+end
+
 function fx.dance(steps)
 	local palette = { "green", "amber", "red", "green", "red", "amber" }
 	for step = 1, (steps or 12) do
@@ -371,7 +387,7 @@ function fx.guardian(ticks)
 	end
 end
 
-local mix_order = { "knight", "comet", "ripple", "matrix", "stack", "dance", "strobe", "heartbeat", "heartbeat3" }
+local mix_order = { "knight", "comet", "ripple", "matrix", "stack", "dance", "strobe", "heartbeat", "heartbeat3", "wingtip" }
 
 if mode == "mix" then
 	local idx = 1
@@ -406,7 +422,7 @@ LUA
 
 is_valid_mode() {
 	case "$1" in
-		stock|off|knight|comet|ripple|strobe|matrix|stack|heartbeat|heartbeat3|traffic|signal|guardian|mix|random|dance) return 0 ;;
+		stock|off|knight|comet|ripple|strobe|matrix|stack|heartbeat|heartbeat3|wingtip|traffic|signal|guardian|mix|random|dance) return 0 ;;
 		*) return 1 ;;
 	esac
 }
