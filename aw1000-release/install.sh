@@ -39,8 +39,9 @@ fi
 
 echo "[2/4] Extracting PWA (/www/app), CGI gateway (/www/cgi-bin/ubus), and rpcd plugin..."
 tar -C / -xzf "$SRC"
-chown -R root:root /www/app /www/cgi-bin/ubus /usr/libexec/rpcd/aw1000 /usr/share/rpcd/acl.d/aw1000-pwa.json /usr/bin/aw1000-telemetry /usr/bin/aw1000-ctl /usr/bin/aw1000-led-fx 2>/dev/null || true
+chown -R root:root /www/app /www/cgi-bin/ubus /usr/libexec/rpcd/aw1000 /usr/libexec/rpcd/aw1000-svc /usr/share/rpcd/acl.d/aw1000-pwa.json /usr/bin/aw1000-telemetry /usr/bin/aw1000-ctl /usr/bin/aw1000-led-fx 2>/dev/null || true
 chmod 755 /www/app /www/cgi-bin/ubus /usr/libexec/rpcd/aw1000 /usr/bin/aw1000-telemetry /usr/bin/aw1000-ctl
+[ -f /usr/libexec/rpcd/aw1000-svc ] && chmod 755 /usr/libexec/rpcd/aw1000-svc || true
 [ -f /usr/bin/aw1000-led-fx ] && chmod 755 /usr/bin/aw1000-led-fx || true
 chmod 644 /www/app/* /usr/share/rpcd/acl.d/aw1000-pwa.json
 

@@ -52,6 +52,7 @@ cp "$PWA_DIR/dist/index.html" \
 
 cp "$PWA_DIR/rpcd/aw1000-cgi-ubus" "$WORK/data/www/cgi-bin/ubus"
 cp "$PWA_DIR/rpcd/aw1000" "$WORK/data/usr/libexec/rpcd/aw1000"
+cp "$PWA_DIR/rpcd/aw1000-svc" "$WORK/data/usr/libexec/rpcd/aw1000-svc"
 cp "$PWA_DIR/rpcd/aw1000-pwa.json" "$WORK/data/usr/share/rpcd/acl.d/aw1000-pwa.json"
 cp "$ROOT/router/aw1000-telemetry" "$WORK/data/usr/bin/aw1000-telemetry"
 cp "$ROOT/router/aw1000-ctl" "$WORK/data/usr/bin/aw1000-ctl"
@@ -59,6 +60,7 @@ cp "$ROOT/router/aw1000-led-fx" "$WORK/data/usr/bin/aw1000-led-fx"
 
 chmod 755 "$WORK/data/www/cgi-bin/ubus" \
           "$WORK/data/usr/libexec/rpcd/aw1000" \
+          "$WORK/data/usr/libexec/rpcd/aw1000-svc" \
           "$WORK/data/usr/bin/aw1000-telemetry" \
           "$WORK/data/usr/bin/aw1000-ctl" \
           "$WORK/data/usr/bin/aw1000-led-fx"

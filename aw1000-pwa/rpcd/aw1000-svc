@@ -61,22 +61,19 @@ local function is_enabled(name)
 	return out:match("%S") ~= nil
 end
 
-local function is_running(name, proc_pat)
+local function is_running(name, bin_name)
 	if name == "firewall" then
 		local out = exec_out("iptables -S 2>/dev/null")
 		return out:find("zone_lan_input", 1, true) ~= nil or out:find("zone_wan_input", 1, true) ~= nil
 	end
-	if proc_pat and proc_pat ~= "" then
-		local out = exec_out("pgrep -f '" .. proc_pat .. "' 2>/dev/null")
-		if out:match("%d+") then return true end
-	end
-	local out = exec_out("pidof " .. name .. " 2>/dev/null")
+	local target = (bin_name and bin_name ~= "") and bin_name or name
+	local out = exec_out("pidof " .. target .. " 2>/dev/null")
 	return out:match("%d+") ~= nil
 end
 
 local roster = {
 	{ name = "dropbear",    label = "Dropbear SSH (:22)",        note = "Lifeline #1 — Protected read-only SSH access",      proc = "dropbear",    protected = true  },
-	{ name = "netbird",     label = "NetBird VPN (wt0)",         note = "Kernel WireGuard overlay remote access",            proc = "/netbird",    protected = false },
+	{ name = "netbird",     label = "NetBird VPN (wt0)",         note = "Kernel WireGuard overlay remote access",            proc = "netbird",     protected = false },
 	{ name = "tailscale",   label = "Tailscale VPN",             note = "Secondary mesh VPN overlay daemon",                 proc = "tailscaled",  protected = false },
 	{ name = "adguardhome", label = "AdGuard Home (:3000)",      note = "Network-wide DNS ad-blocker (127.0.0.1:5353)",      proc = "AdGuardHome", protected = false },
 	{ name = "firewall",    label = "OpenWrt Firewall (fw3)",    note = "NAT, WAN/LAN zones & /etc/firewall.user rules",     proc = "",            protected = false },
@@ -111,7 +108,7 @@ local svc = tostring(req.service or "")
 local act = tostring(req.action or "")
 
 local ALLOWED_SVC = {
-	netbird = "/netbird",
+	netbird = "netbird",
 	tailscale = "tailscaled",
 	adguardhome = "AdGuardHome",
 	firewall = "",
@@ -148,13 +145,11 @@ if not f then
 end
 f:close()
 
-local p = io.popen(init_path .. " " .. act .. " 2>&1")
-local out = p and p:read("*a") or ""
-local ok_close, _, code = false, nil, 0
-if p then
-	ok_close, _, code = p:close()
-end
-if type(ok_close) == "number" then code = ok_close end
+local p = io.popen(init_path .. " " .. act .. " 2>&1; echo __EXIT__$?")
+local raw = p and p:read("*a") or ""
+if p then p:close() end
+local code = tonumber(raw:match("__EXIT__(%d+)")) or 1
+local out = raw:gsub("__EXIT__%d+%s*$", "")
 if act == "start" or act == "stop" or act == "restart" then
 	os.execute("sleep 1")
 end
@@ -174,20 +169,25 @@ if svc == "firewall" then
 	local fw = exec_out("iptables -S 2>/dev/null")
 	running = fw:find("zone_lan_input", 1, true) ~= nil or fw:find("zone_wan_input", 1, true) ~= nil
 else
-	local pat = ALLOWED_SVC[svc]
-	running = (exec_out("pgrep -f '" .. pat .. "' 2>/dev/null"):match("%d+") ~= nil)
-		or (exec_out("pidof " .. svc .. " 2>/dev/null"):match("%d+") ~= nil)
+	local bin = ALLOWED_SVC[svc]
+	if bin == "" then bin = svc end
+	running = (exec_out("pidof " .. bin .. " 2>/dev/null"):match("%d+") ~= nil)
 end
 
 if #out > 2000 then out = out:sub(1, 2000) .. "\n...(truncated)" end
 
+local action_ok = (code == 0)
+if act == "enable" and not enabled then action_ok = false end
+if act == "disable" and enabled then action_ok = false end
+
 io.write(json.stringify({
-	ok = true,
+	ok = action_ok,
+	error = (not action_ok) and ("Command exited " .. tostring(code) .. (out ~= "" and (": " .. out) or "")) or nil,
 	service = svc,
 	action = act,
 	running = running,
 	enabled = enabled,
-	exit_code = tonumber(code) or 0,
+	exit_code = code,
 	output = out
 }) .. "\n")
 LUA

@@ -1844,6 +1844,18 @@ function appendOpkgLog(header, body = "") {
     : block;
 }
 
+function handleWriteAuthFailure(res, label = "Action") {
+  if (res && res.code === 6) {
+    state.editMode = false;
+    state.loginError = "Session expired or locked — enter router password to unlock Edit Mode.";
+    state.loginModalOpen = true;
+    appendOpkgLog(`AUTH REQUIRED (${label}):`, res.data?.error || res.statusText || "ubus session expired");
+    pushToast("Edit Mode session expired — please re-enter password.");
+    return true;
+  }
+  return false;
+}
+
 function renderSoftwareScreen() {
   if (state.dataSource === "live" && state.liveLoading) {
     return renderLoadingSkeleton();
@@ -1922,7 +1934,7 @@ function renderSoftwareScreen() {
                   </div>
 
                   <div class="svc-boot-row">
-                    <label class="svc-boot-toggle">
+                    <label class="svc-boot-toggle" ${(!isProt && s.installed && locked) ? 'data-action="prompt-unlock-edit" title="Click to unlock Edit Mode"' : ""}>
                       <input type="checkbox" data-svc-boot="${escapeHtml(s.name)}"
                         ${s.enabled ? "checked" : ""} ${ctrlDisabled}/>
                       <span>Enable on boot</span>
@@ -3359,11 +3371,27 @@ function setupEvents() {
         }
       };
       render();
+    } else if (action === "prompt-unlock-edit") {
+      if (!state.editMode) {
+        pushToast("Unlock Edit Mode to modify services or packages.");
+        if (state.dataSource === "live") {
+          state.loginError = "";
+          state.loginPassInput = "";
+          state.loginModalOpen = true;
+        }
+        render();
+      }
     } else if (action === "svc-refresh") {
       await refreshTabSpecificLive("software");
     } else if (action === "svc-action") {
       if (!state.editMode) {
         pushToast("Unlock Edit Mode to control services.");
+        if (state.dataSource === "live") {
+          state.loginError = "";
+          state.loginPassInput = "";
+          state.loginModalOpen = true;
+          render();
+        }
         return;
       }
       const svc = actionEl.getAttribute("data-svc") || "";
@@ -3380,6 +3408,10 @@ function setupEvents() {
             args: { service: svc, action: act }
           }], 20000);
           state.svcBusy = null;
+          if (handleWriteAuthFailure(res, `${svc} ${act}`)) {
+            render();
+            return;
+          }
           if (!res || res.code !== 0 || res.data?.ok === false) {
             const msg = res?.data?.error || res?.statusText || "Service action failed";
             appendOpkgLog(`ERROR (${svc} ${act}):`, msg);
@@ -3436,6 +3468,10 @@ function setupEvents() {
         try {
           const [res] = await ubusBatchCall([{ object: "aw1000-svc", method: "opkg_update", args: {} }], 60000);
           state.opkgBusy = false;
+          if (handleWriteAuthFailure(res, "opkg update")) {
+            render();
+            return;
+          }
           if (!res || res.code !== 0 || !res.data) {
             const msg = res?.statusText || "opkg update failed";
             appendOpkgLog("opkg update FAILED:", msg);
@@ -3469,6 +3505,10 @@ function setupEvents() {
         try {
           const [res] = await ubusBatchCall([{ object: "aw1000-svc", method: "opkg_install", args: { package: pkg } }], 60000);
           state.opkgBusy = false;
+          if (handleWriteAuthFailure(res, `opkg install ${pkg}`)) {
+            render();
+            return;
+          }
           if (!res || res.code !== 0 || res.data?.ok === false) {
             const msg = res?.data?.error || res?.data?.output || res?.statusText || "Install failed";
             appendOpkgLog(`opkg install ${pkg} FAILED:`, msg);
@@ -3508,6 +3548,10 @@ function setupEvents() {
             try {
               const [res] = await ubusBatchCall([{ object: "aw1000-svc", method: "opkg_remove", args: { package: pkg } }], 60000);
               state.opkgBusy = false;
+              if (handleWriteAuthFailure(res, `opkg remove ${pkg}`)) {
+                render();
+                return;
+              }
               if (!res || res.code !== 0 || res.data?.ok === false) {
                 const msg = res?.data?.error || res?.data?.output || res?.statusText || "Remove failed";
                 appendOpkgLog(`opkg remove ${pkg} FAILED:`, msg);
@@ -3613,14 +3657,21 @@ function setupEvents() {
             args: { service: svcBoot, action: act }
           }], 15000);
           state.svcBusy = null;
+          if (handleWriteAuthFailure(res, `${svcBoot} ${act}`)) {
+            render();
+            return;
+          }
           if (!res || res.code !== 0 || res.data?.ok === false) {
             const msg = res?.data?.error || res?.statusText || "Boot toggle failed";
             appendOpkgLog(`ERROR (${svcBoot} ${act}):`, msg);
             pushToast(`Boot toggle failed: ${msg}`);
           } else {
             const idx = (state.svcList || []).findIndex((x) => x.name === svcBoot);
-            if (idx >= 0) state.svcList[idx].enabled = Boolean(res.data.enabled);
-            appendOpkgLog(`OK (${svcBoot} ${act}): enabled=${res.data.enabled}`);
+            if (idx >= 0) {
+              state.svcList[idx].enabled = Boolean(res.data.enabled);
+              state.svcList[idx].running = Boolean(res.data.running);
+            }
+            appendOpkgLog(`OK (${svcBoot} ${act}): enabled=${res.data.enabled}, running=${res.data.running}`);
             pushToast(`${svcBoot}: boot auto-start ${res.data.enabled ? "enabled" : "disabled"}.`);
           }
         } catch (err) {
@@ -4077,7 +4128,7 @@ async function pollTick(forceExtended = false) {
       state.staleSince = new Date().toTimeString().slice(0, 5);
     }
   }
-  if (!isAnyModalOpen() && !isFormFieldFocused()) {
+  if (!isAnyModalOpen() && !isFormFieldFocused() && state.activeTab !== "software" && !state.svcBusy && !state.opkgBusy) {
     render();
   }
 }
