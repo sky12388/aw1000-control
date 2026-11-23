@@ -1,0 +1,463 @@
+/* rgb-ultra.css - global RGB theme with Dark / Light mode + global contrast reset
+   Loaded from the active LuCI theme header. CSS only; no routes or backend logic. */
+
+/* ===================== PALETTE ===================== */
+:root{
+  --rgb-panel:#131829;
+  --rgb-panel-inner:#1a2138;
+  --rgb-bg:#070b18;
+  --rgb-text:#f1f5f9;
+  --rgb-accent:#38bdf8;
+  --rgb-muted:#94a3b8;
+  --rgb-line:rgba(148,163,184,.28);
+}
+html[data-theme="light"]{
+  color-scheme:light;
+  --rgb-panel:#ffffff;
+  --rgb-panel-inner:#f8fafc;
+  --rgb-bg:#eef2f7;
+  --rgb-text:#0f172a;
+  --rgb-accent:#0369a1;
+  --rgb-muted:#475569;
+  --rgb-line:rgba(15,23,42,.16);
+}
+
+/* ===================== ANIMATIONS ===================== */
+@keyframes rgbFlow{0%{background-position:0% 50%}100%{background-position:300% 50%}}
+@keyframes rgbGlow{
+  0%,100%{box-shadow:0 0 6px rgba(34,211,238,.40),0 0 14px rgba(255,45,111,.22)}
+  50%{box-shadow:0 0 16px rgba(34,211,238,.80),0 0 30px rgba(255,45,111,.50)}
+}
+
+/* ===================== BACKDROP ===================== */
+body{
+  background:
+   radial-gradient(1050px 520px at 10% -10%,rgba(124,58,237,.26),transparent 60%),
+   radial-gradient(950px 470px at 94% 0%,rgba(34,211,238,.18),transparent 58%),
+   linear-gradient(160deg,var(--rgb-bg),#0d1428 55%,#060b18)!important;
+  background-attachment:fixed!important;
+  color:var(--rgb-text)!important;
+}
+
+/* ===================== TOP BAR ===================== */
+header,.fill{
+  background:linear-gradient(90deg,rgba(8,12,28,.95),rgba(14,22,48,.95))!important;
+  border:0!important;box-shadow:0 2px 0 rgba(255,45,111,.6),0 8px 28px rgba(0,0,0,.45)!important;
+}
+header::after{
+  content:"";display:block;height:2px;
+  background:linear-gradient(90deg,#ff2d6f,#ffb020,#7cff6b,#22d3ee,#a855f7,#ff2d6f);
+  background-size:300% 100%;animation:rgbFlow 6s linear infinite;
+}
+.brand{color:#fff!important;font-weight:900!important;text-shadow:0 0 16px rgba(34,211,238,.7)!important}
+ul.nav>li>a{color:#dbeafe!important;font-weight:750!important;border-radius:999px!important}
+ul.nav>li.active>a,ul.nav>li:hover>a{
+  background:linear-gradient(90deg,#ff2d6f,#7c3aed)!important;color:#fff!important;
+  box-shadow:0 0 16px rgba(255,45,111,.6)!important;
+}
+
+/* ===================== DARK / LIGHT TOGGLE ===================== */
+.rgb-theme-control{display:flex;align-items:center;margin-left:12px;flex:0 0 auto}
+#rgb-theme-toggle{
+  cursor:pointer;white-space:nowrap;
+  border:1px solid rgba(255,255,255,.30)!important;border-radius:999px!important;
+  padding:5px 13px!important;font-size:12px!important;font-weight:850!important;line-height:1.2!important;
+  color:#fff!important;
+  background:linear-gradient(90deg,#ff2d6f,#7c3aed,#22d3ee,#7c3aed,#ff2d6f)!important;
+  background-size:300% 100%!important;
+  box-shadow:0 0 14px rgba(124,58,237,.65)!important;
+  animation:rgbFlow 6s linear infinite;
+}
+#rgb-theme-toggle:hover{filter:brightness(1.15)}
+#rgb-theme-toggle:focus-visible{outline:2px solid #38bdf8;outline-offset:2px}
+html[data-theme="light"] #rgb-theme-toggle{
+  color:#0f172a!important;border-color:rgba(15,23,42,.25)!important;
+  background:linear-gradient(90deg,#ffd1dc,#d9c2ff,#b6ecff,#d9c2ff,#ffd1dc)!important;
+  box-shadow:0 0 10px rgba(124,58,237,.35)!important;
+}
+
+/* ===================== TAB PILLS (both themes) ===================== */
+.tabs,#tabmenu ul.tabs{
+  display:flex!important;flex-wrap:wrap!important;gap:8px!important;
+  border:0!important;background:transparent!important;margin:0 0 16px!important;padding:0!important;
+}
+.tabs>li,#tabmenu ul.tabs>li{
+  float:none!important;margin:0!important;padding:0!important;border:0!important;background:transparent!important;
+}
+.tabs>li>a,#tabmenu ul.tabs>li>a{
+  display:inline-flex;align-items:center;justify-content:center;
+  padding:7px 15px!important;border-radius:999px!important;
+  border:1px solid rgba(255,255,255,.22)!important;
+  font-size:12px!important;font-weight:850!important;color:#fff!important;
+  text-decoration:none!important;white-space:nowrap;
+  background:linear-gradient(135deg,var(--pill,#7c3aed),rgba(8,12,26,.92))!important;
+  animation:rgbGlow 2.8s ease-in-out infinite;transition:transform .15s ease;
+}
+.tabs>li>a:hover,#tabmenu ul.tabs>li>a:hover{transform:translateY(-2px)}
+.tabs>li:nth-child(6n+1){--pill:#ff2d6f}
+.tabs>li:nth-child(6n+2){--pill:#ff9f1c}
+.tabs>li:nth-child(6n+3){--pill:#00c896}
+.tabs>li:nth-child(6n+4){--pill:#22d3ee}
+.tabs>li:nth-child(6n+5){--pill:#4f8cff}
+.tabs>li:nth-child(6n+6){--pill:#a855f7}
+.tabs>li.active>a,#tabmenu ul.tabs>li.active>a{
+  background:linear-gradient(90deg,#ff2d6f,#ffb020,#7cff6b,#22d3ee,#a855f7,#ff2d6f)!important;
+  background-size:300% 100%!important;animation:rgbFlow 4s linear infinite!important;
+  color:#05101c!important;border-color:transparent!important;font-weight:900!important;
+  box-shadow:0 0 20px rgba(34,211,238,.85),0 0 36px rgba(255,45,111,.55)!important;
+}
+
+/* ===================== NEON CARD BORDERS (both themes) ===================== */
+.cbi-map,.cbi-section,.ginfo-dashboard .cbi-section,.ginfo-page .cbi-section{
+  position:relative;border:1px solid transparent!important;border-radius:14px!important;
+  box-shadow:0 12px 32px rgba(0,0,0,.32)!important;padding:16px!important;margin-bottom:16px!important;
+}
+.cbi-map::before,.cbi-section::before,.ginfo-dashboard .cbi-section::before,.ginfo-page .cbi-section::before{
+  content:"";position:absolute;inset:-2px;border-radius:16px;padding:2px;
+  background:linear-gradient(90deg,#ff2d6f,#ff9f1c,#ffe600,#7cff6b,#22d3ee,#a855f7,#ff2d6f);
+  background-size:300% 100%;animation:rgbFlow 7s linear infinite;
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
+  -webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none;z-index:1;
+}
+.cbi-map>*,.cbi-section>*,.ginfo-dashboard .cbi-section>*,.ginfo-page .cbi-section>*{position:relative;z-index:2}
+
+/* ================================================================
+   DARK MODE - GLOBAL RESET (every surface, every text node)
+   ================================================================ */
+html[data-theme="dark"]{color-scheme:dark}
+
+/* 1) All bootstrap light surfaces -> dark slate */
+html[data-theme="dark"] body,
+html[data-theme="dark"] #maincontent,
+html[data-theme="dark"] .container,
+html[data-theme="dark"] .cbi-map,
+html[data-theme="dark"] .cbi-section,
+html[data-theme="dark"] .cbi-section-node,
+html[data-theme="dark"] .cbi-value,
+html[data-theme="dark"] .cbi-tabmenu,
+html[data-theme="dark"] .cbi-page-actions,
+html[data-theme="dark"] .table,
+html[data-theme="dark"] .tr,
+html[data-theme="dark"] .td,
+html[data-theme="dark"] .th,
+html[data-theme="dark"] .alert-message,
+html[data-theme="dark"] .modal,
+html[data-theme="dark"] .modal-body,
+html[data-theme="dark"] .modal-content,
+html[data-theme="dark"] .dropdown-menu,
+html[data-theme="dark"] pre,
+html[data-theme="dark"] code{
+  background:#131829!important;
+  color:#f1f5f9!important;
+  border-color:rgba(148,163,184,.28)!important;
+}
+/* deeper slate for page canvas, maps, modals, dropdowns */
+html[data-theme="dark"] #maincontent,
+html[data-theme="dark"] .cbi-map,
+html[data-theme="dark"] .modal,
+html[data-theme="dark"] .modal-body,
+html[data-theme="dark"] .modal-content,
+html[data-theme="dark"] .dropdown-menu,
+html[data-theme="dark"] .ginfo-dashboard{background:#0b0f19!important}
+/* raised tiles / table headers */
+html[data-theme="dark"] .cbi-section-node,
+html[data-theme="dark"] .cbi-value,
+html[data-theme="dark"] .tr,
+html[data-theme="dark"] .td,
+html[data-theme="dark"] .th,
+html[data-theme="dark"] pre,
+html[data-theme="dark"] code{background:#1a2138!important}
+html[data-theme="dark"] .th,
+html[data-theme="dark"] .cbi-section-table .th{color:#38bdf8!important;font-weight:900!important}
+html[data-theme="dark"] .table tr:hover td,
+html[data-theme="dark"] .table .tr:hover .td{background:#243154!important}
+
+/* 2) Global high-contrast typography */
+html[data-theme="dark"] body,
+html[data-theme="dark"] p,
+html[data-theme="dark"] span,
+html[data-theme="dark"] div,
+html[data-theme="dark"] td,
+html[data-theme="dark"] th,
+html[data-theme="dark"] label,
+html[data-theme="dark"] strong,
+html[data-theme="dark"] h1,
+html[data-theme="dark"] h2,
+html[data-theme="dark"] h3,
+html[data-theme="dark"] h4,
+html[data-theme="dark"] h5,
+html[data-theme="dark"] h6,
+html[data-theme="dark"] .cbi-value-title,
+html[data-theme="dark"] .cbi-value-field,
+html[data-theme="dark"] .cbi-tabmenu li a{
+  color:#f1f5f9!important;
+}
+/* muted descriptions / hints */
+html[data-theme="dark"] .cbi-value-description,
+html[data-theme="dark"] .cbi-section-descr,
+html[data-theme="dark"] .cbi-map-descr,
+html[data-theme="dark"] .cbi-page-actions .btn:disabled,
+html[data-theme="dark"] small,
+html[data-theme="dark"] .ginfo-title span{
+  color:#94a3b8!important;
+}
+/* links (but not tab pills / nav links - re-asserted below) */
+html[data-theme="dark"] a{color:#38bdf8!important}
+html[data-theme="dark"] a:visited{color:#7dd3fc!important}
+
+/* 3) Form controls */
+html[data-theme="dark"] input,
+html[data-theme="dark"] select,
+html[data-theme="dark"] textarea,
+html[data-theme="dark"] .cbi-input-text,
+html[data-theme="dark"] .cbi-input-password,
+html[data-theme="dark"] .cbi-input-select{
+  background:#0f172a!important;
+  color:#f8fafc!important;
+  border:1px solid #475569!important;
+  border-radius:6px!important;
+}
+html[data-theme="dark"] input::placeholder,
+html[data-theme="dark"] textarea::placeholder{color:#94a3b8!important;opacity:1!important}
+html[data-theme="dark"] select option{background:#0f172a!important;color:#f8fafc!important}
+html[data-theme="dark"] input[type="checkbox"],
+html[data-theme="dark"] input[type="radio"]{accent-color:#38bdf8!important}
+
+/* 4) Exemptions: buttons, badges, headings, nav keep their own crisp colours */
+html[data-theme="dark"] .cbi-button,
+html[data-theme="dark"] .btn,
+html[data-theme="dark"] ul.nav>li>a,
+html[data-theme="dark"] .tabs>li>a,
+html[data-theme="dark"] #tabmenu ul.tabs>li>a{color:#fff!important}
+html[data-theme="dark"] .cbi-button-apply,
+html[data-theme="dark"] .cbi-button-action,
+html[data-theme="dark"] .cbi-button-positive,
+html[data-theme="dark"] .btn.primary{color:#03131a!important}
+html[data-theme="dark"] .ifacebadge,
+html[data-theme="dark"] .zonebadge,
+html[data-theme="dark"] .badge,
+html[data-theme="dark"] .label,
+html[data-theme="dark"] .status,
+html[data-theme="dark"] .cbi-progressbar>div{color:#fff!important}
+html[data-theme="dark"] h2,
+html[data-theme="dark"] h3,
+html[data-theme="dark"] h4,
+html[data-theme="dark"] .ginfo-title strong,
+html[data-theme="dark"] .cbi-section-title{
+  background:linear-gradient(90deg,#ff4d8d,#ffd166,#7cff6b,#38bdf8,#a78bfa,#ff4d8d)!important;
+  background-size:300% 100%!important;
+  -webkit-background-clip:text!important;background-clip:text!important;
+  -webkit-text-fill-color:transparent!important;color:transparent!important;
+  animation:rgbFlow 8s linear infinite;font-weight:900!important;
+}
+html[data-theme="dark"] #modemenu li a{color:#38bdf8!important}
+html[data-theme="dark"] .cbi-progressbar>div{
+  background:linear-gradient(90deg,#00e5a8,#38bdf8,#7c3aed,#ff2d6f)!important;
+  background-size:300% 100%!important;animation:rgbFlow 5s linear infinite!important;
+  box-shadow:0 0 12px rgba(56,189,248,.7)!important;
+}
+
+/* 5) Overrides for the inline <style> that 3gdetail.js injects AFTER this file.
+      Prefixing with html[data-theme="dark"] always out-specifies the injected rules. */
+html[data-theme="dark"] .ginfo-dashboard{background:#0b0f19!important;color:#f1f5f9!important}
+html[data-theme="dark"] .ginfo-dashboard .ginfo-title strong{color:#f1f5f9!important}
+html[data-theme="dark"] .ginfo-dashboard .ginfo-title span{color:#94a3b8!important}
+html[data-theme="dark"] .ginfo-dashboard .ginfo-icon-button{
+  background:#1a2138!important;color:#38bdf8!important;border-color:#475569!important;
+}
+html[data-theme="dark"] .ginfo-dashboard h4{color:#f1f5f9!important}
+html[data-theme="dark"] .ginfo-dashboard table.table{background:transparent!important}
+html[data-theme="dark"] .ginfo-dashboard table.table tr.tr{background:#131829!important;border-color:#475569!important}
+html[data-theme="dark"] .ginfo-dashboard table.table td.td{background:transparent!important;border-color:transparent!important}
+html[data-theme="dark"] .ginfo-dashboard table.table tr.tr>td.td:first-child{color:#94a3b8!important}
+html[data-theme="dark"] .ginfo-dashboard table.table tr.tr>td.td:last-child{color:#f1f5f9!important}
+html[data-theme="dark"] .ginfo-dashboard #signal{color:#38bdf8!important}
+html[data-theme="dark"] .ginfo-dashboard #mode,
+html[data-theme="dark"] .ginfo-dashboard #protocol,
+html[data-theme="dark"] .ginfo-dashboard #sim,
+html[data-theme="dark"] .ginfo-dashboard #mccmnc{color:#7dd3fc!important}
+html[data-theme="dark"] .ginfo-dashboard #operator{color:#f8fafc!important}
+html[data-theme="dark"] .ginfo-dashboard #location{color:#94a3b8!important}
+html[data-theme="dark"] .ginfo-dashboard .ifacebadge{
+  background:linear-gradient(135deg,#ff2d6f,#7c3aed)!important;color:#fff!important;border-color:transparent!important;
+}
+html[data-theme="dark"] .ginfo-dashboard .cbi-progressbar{background:#1a2138!important;color:#f1f5f9!important}
+html[data-theme="dark"] .ginfo-dashboard .cbi-progressbar>div{
+  background:linear-gradient(90deg,#00e5a8,#38bdf8,#7c3aed,#ff2d6f)!important;
+}
+
+/* 6) Bootstrap leftovers that still force light surfaces (inline / own class) */
+html[data-theme="dark"] .cbi-tabmenu li.cbi-tab,
+html[data-theme="dark"] .cbi-tabmenu li.cbi-tab a{
+  background:#1a2138!important;color:#f1f5f9!important;border-color:#475569!important;
+}
+html[data-theme="dark"] .cbi-tabmenu li.cbi-tab.active,
+html[data-theme="dark"] .cbi-tabmenu li.cbi-tab.active a{
+  background:linear-gradient(90deg,#ff2d6f,#7c3aed,#22d3ee)!important;
+  color:#fff!important;border-color:transparent!important;
+}
+html[data-theme="dark"] .cbi-tooltip{
+  background:#1a2138!important;color:#f1f5f9!important;border:1px solid #475569!important;
+}
+html[data-theme="dark"] .ifacebox,
+html[data-theme="dark"] .ifacebox-body,
+html[data-theme="dark"] .ifacebox-head{
+  background:#131829!important;background-image:none!important;
+  color:#f1f5f9!important;border-color:#475569!important;
+}
+html[data-theme="dark"] .ifacebox-head{background:#1a2138!important}
+html[data-theme="dark"] #indicators span,
+html[data-theme="dark"] #indicators .badge{
+  background:#1a2138!important;color:#38bdf8!important;border:1px solid #475569!important;
+}
+html[data-theme="dark"] .cbi-dropdown ul,
+html[data-theme="dark"] .cbi-dropdown .dropdown-menu,
+html[data-theme="dark"] .cbi-dropdown .dropdown{
+  background:#1a2138!important;color:#f1f5f9!important;border-color:#475569!important;
+}
+/* dynlist / dropdown option rows (e.g. NTP servers on System) */
+html[data-theme="dark"] .cbi-dynlist .item,
+html[data-theme="dark"] .cbi-dynlist>div,
+html[data-theme="dark"] .cbi-dynlist .item>span,
+html[data-theme="dark"] .cbi-dynlist .item>label,
+html[data-theme="dark"] .cbi-dynlist .item>strong,
+html[data-theme="dark"] .cbi-dropdown .item,
+html[data-theme="dark"] .cbi-multi-select .item{
+  background:#1a2138!important;color:#f1f5f9!important;border:1px solid #475569!important;
+}
+html[data-theme="dark"] .cbi-dynlist .item:hover,
+html[data-theme="dark"] .cbi-dropdown .item:hover{background:#243154!important}
+html[data-theme="dark"] .cbi-dynlist .item a,
+html[data-theme="dark"] .cbi-dropdown .item a{color:#f8fafc!important}
+
+/* ================================================================
+   LIGHT MODE - white surfaces, dark text, RGB neon borders intact
+   ================================================================ */
+html[data-theme="light"] body{
+  background:
+   radial-gradient(900px 460px at 8% -10%,rgba(124,58,237,.12),transparent 60%),
+   radial-gradient(900px 460px at 95% 0%,rgba(34,211,238,.14),transparent 58%),
+   linear-gradient(160deg,#eef2f7,#f8fafc 60%,#e8eef6)!important;
+  color:#0f172a!important;
+}
+html[data-theme="light"] header,
+html[data-theme="light"] .fill{
+  background:linear-gradient(90deg,#ffffff,#f1f5f9)!important;
+  box-shadow:0 2px 0 rgba(255,45,111,.55),0 6px 20px rgba(15,23,42,.12)!important;
+}
+html[data-theme="light"] .brand{color:#0f172a!important;text-shadow:none!important}
+html[data-theme="light"] ul.nav>li>a{color:#0f172a!important}
+html[data-theme="light"] body,
+html[data-theme="light"] #maincontent,
+html[data-theme="light"] .container,
+html[data-theme="light"] .cbi-map,
+html[data-theme="light"] .cbi-section,
+html[data-theme="light"] .cbi-section-node,
+html[data-theme="light"] .cbi-value,
+html[data-theme="light"] .cbi-tabmenu,
+html[data-theme="light"] .cbi-page-actions,
+html[data-theme="light"] .table,
+html[data-theme="light"] .tr,
+html[data-theme="light"] .td,
+html[data-theme="light"] .th,
+html[data-theme="light"] .alert-message,
+html[data-theme="light"] .modal,
+html[data-theme="light"] .modal-body,
+html[data-theme="light"] .modal-content,
+html[data-theme="light"] .dropdown-menu,
+html[data-theme="light"] pre,
+html[data-theme="light"] code,
+html[data-theme="light"] .ginfo-dashboard{
+  background:#ffffff!important;
+  color:#0f172a!important;
+  border-color:rgba(15,23,42,.16)!important;
+  box-shadow:0 6px 20px rgba(15,23,42,.10)!important;
+}
+html[data-theme="light"] .cbi-value,
+html[data-theme="light"] .td,
+html[data-theme="light"] .th,
+html[data-theme="light"] pre,
+html[data-theme="light"] code{background:#f8fafc!important}
+html[data-theme="light"] input,
+html[data-theme="light"] select,
+html[data-theme="light"] textarea,
+html[data-theme="light"] .cbi-input-text{
+  background:#ffffff!important;color:#0f172a!important;border:1px solid #cbd5e1!important;
+}
+html[data-theme="light"] .table .th,
+html[data-theme="light"] th{color:#0f172a!important;font-weight:900!important}
+html[data-theme="light"] .cbi-value-title{color:#334155!important;font-weight:800!important}
+html[data-theme="light"] .cbi-value-description,
+html[data-theme="light"] .cbi-section-descr,
+html[data-theme="light"] .cbi-map-descr,
+html[data-theme="light"] small,
+html[data-theme="light"] .ginfo-title span{color:#475569!important}
+html[data-theme="light"] a{color:#0369a1!important}
+html[data-theme="light"] h2,
+html[data-theme="light"] h3,
+html[data-theme="light"] h4,
+html[data-theme="light"] .ginfo-title strong,
+html[data-theme="light"] .cbi-section-title{
+  background:none!important;-webkit-text-fill-color:#0f172a!important;color:#0f172a!important;font-weight:900!important;
+}
+html[data-theme="light"] .ifacebadge,
+html[data-theme="light"] .zonebadge,
+html[data-theme="light"] .badge,
+html[data-theme="light"] .label,
+html[data-theme="light"] .status{color:#fff!important}
+html[data-theme="light"] #modemenu li a{color:#0369a1!important}
+/* keep the dashboard injected style from winning in light mode too */
+html[data-theme="light"] .ginfo-dashboard .ginfo-title strong{color:#0f172a!important}
+html[data-theme="light"] .ginfo-dashboard .ginfo-title span{color:#475569!important}
+html[data-theme="light"] .ginfo-dashboard h4{color:#0f172a!important}
+html[data-theme="light"] .ginfo-dashboard table.table tr.tr>td.td:first-child{color:#475569!important}
+html[data-theme="light"] .ginfo-dashboard table.table tr.tr>td.td:last-child{color:#0f172a!important}
+html[data-theme="light"] .ginfo-dashboard #signal{color:#0369a1!important}
+html[data-theme="light"] .ginfo-dashboard #operator{color:#0f172a!important}
+html[data-theme="light"] .ginfo-dashboard #location{color:#475569!important}
+html[data-theme="light"] .ginfo-dashboard .cbi-progressbar{background:#e8eef8!important;color:#0f172a!important}
+html[data-theme="light"] .ginfo-dashboard .cbi-progressbar>div{
+  background:linear-gradient(90deg,#00c896,#0284c7,#7c3aed,#ff2d6f)!important;
+}
+
+/* ===================== SHARED CONTROLS ===================== */
+.btn,.cbi-button{
+  border-radius:999px!important;border:1px solid var(--rgb-line)!important;
+  font-weight:800!important;padding:6px 14px!important;transition:all .15s ease;
+  background:var(--rgb-panel-inner)!important;color:var(--rgb-text)!important;
+}
+.btn:hover,.cbi-button:hover{
+  background:linear-gradient(90deg,#ff2d6f,#7c3aed,#22d3ee)!important;
+  color:#fff!important;border-color:transparent!important;
+  box-shadow:0 0 18px rgba(124,58,237,.7)!important;
+}
+.cbi-button-apply,.cbi-button-action,.cbi-button-positive,.btn.primary{
+  background:linear-gradient(90deg,#00c896,#22d3ee)!important;color:#03131a!important;border-color:transparent!important;
+}
+.cbi-button-remove,.cbi-button-negative{
+  background:linear-gradient(90deg,#ff2d6f,#f97316)!important;color:#fff!important;border-color:transparent!important;
+}
+.ifacebadge,.zonebadge,.badge,.label,.status{
+  background:linear-gradient(135deg,rgba(255,45,111,.9),rgba(124,58,237,.9))!important;
+  color:#fff!important;border:1px solid rgba(255,255,255,.22)!important;
+  border-radius:999px!important;font-weight:850!important;
+  box-shadow:0 0 10px rgba(255,45,111,.45)!important;
+}
+.alert-message{border-radius:12px!important;font-weight:650!important}
+.alert-message.success,.alert-message.notice{
+  background:linear-gradient(90deg,rgba(0,200,150,.28),rgba(34,211,238,.20))!important;
+  border-color:#00c896!important;color:#065f46!important;
+}
+.alert-message.warning{
+  background:linear-gradient(90deg,rgba(255,176,32,.26),rgba(255,45,111,.18))!important;
+  border-color:#ffb020!important;color:#7c2d12!important;
+}
+.alert-message.error{
+  background:linear-gradient(90deg,rgba(255,45,111,.28),rgba(239,68,68,.22))!important;
+  border-color:#ff2d6f!important;color:#9f1239!important;
+}
+#modemenu li a{font-weight:750!important}
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important}
+}

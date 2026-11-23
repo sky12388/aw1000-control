@@ -16,6 +16,8 @@
 !aw1000-apk/**
 !aw1000-release/
 !aw1000-release/**
+!luci-rgb-ultra/
+!luci-rgb-ultra/**
 !router/
 !router/aw1000-telemetry
 !router/aw1000-ctl

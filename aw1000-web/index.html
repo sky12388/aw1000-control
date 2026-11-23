@@ -189,17 +189,25 @@
 
         <article class="card">
           <div class="card-top-bar net"></div>
-          <span class="badge" style="width:fit-content;margin-bottom:6px;">Animated Neon Accents · Factory-Reset Safe</span>
-          <h3>Normalized Cellular View &amp; 1-Command Restore</h3>
+          <span class="badge" style="width:fit-content;margin-bottom:6px;">Animated Neon Accents · Clean Uninstall</span>
+          <h3>1-Command Public Install (<code class="mono">.ipk</code>)</h3>
           <p>
             Features animated RGB neon card borders, gradient headings, glowing tab pills, reduced-motion
-            support, and a cleaned-up <strong>Cellular Information</strong> modem view with direct
-            <code class="mono">AT+GTACT</code> band-lock verification. Backed up to USB with SHA-256 manifests
-            for instant recovery after any reset.
+            support, and a normalized <strong>Cellular Information</strong> modem view. Auto-backs up your
+            existing <code class="mono">header.htm</code> and rolls back cleanly with
+            <code class="mono">opkg remove luci-theme-rgb-ultra</code>.
           </p>
+          <div class="dl-list" style="margin-top:4px;">
+            <a class="btn btn-primary" href="https://github.com/sky12388/aw1000-control/releases/download/v1.0.11/luci-theme-rgb-ultra_1.0.0_all.ipk">
+              ↓ Download RGB LuCI .ipk (8 KB)
+            </a>
+            <a class="btn btn-ghost" href="#install">
+              SSH Install Guide ↓
+            </a>
+          </div>
           <div class="code-box" style="margin-top:6px;">
-            <pre id="rgbLuciRestoreCmd" class="mono">sh /mnt/sda1/LUCI_UI_BACKUP/restore.sh</pre>
-            <button class="copy-btn" data-copy-target="rgbLuciRestoreCmd">Copy</button>
+            <pre id="rgbLuciInstallCmd" class="mono">nslookup github.com >/dev/null 2>&1 || echo "nameserver 1.1.1.1" > /tmp/resolv.conf.auto; curl -fsSL https://github.com/sky12388/aw1000-control/releases/download/v1.0.11/luci-theme-rgb-ultra_1.0.0_all.ipk -o /tmp/luci-theme-rgb-ultra_1.0.0_all.ipk &amp;&amp; opkg install /tmp/luci-theme-rgb-ultra_1.0.0_all.ipk</pre>
+            <button class="copy-btn" data-copy-target="rgbLuciInstallCmd">Copy</button>
           </div>
         </article>
       </div>
@@ -227,6 +235,9 @@
             </a>
             <a class="btn btn-ghost" href="https://github.com/sky12388/aw1000-control/releases/download/v1.0.11/aw1000-control-router-v1.0.11.tar.gz">
               ↓ Router .tar.gz (78 KB)
+            </a>
+            <a class="btn btn-ghost" href="https://github.com/sky12388/aw1000-control/releases/download/v1.0.11/luci-theme-rgb-ultra_1.0.0_all.ipk">
+              ↓ RGB LuCI Theme .ipk (8 KB)
             </a>
           </div>
         </article>
@@ -290,6 +301,12 @@
         <div class="code-box">
           <pre id="opkgInstallCmd" class="mono">nslookup github.com >/dev/null 2>&1 || echo "nameserver 1.1.1.1" > /tmp/resolv.conf.auto; curl -fsSL https://github.com/sky12388/aw1000-control/releases/download/v1.0.11/aw1000-control_1.0.11_all.ipk -o /tmp/aw1000-control_1.0.11_all.ipk &amp;&amp; opkg install /tmp/aw1000-control_1.0.11_all.ipk</pre>
           <button class="copy-btn" data-copy-target="opkgInstallCmd">Copy</button>
+        </div>
+
+        <p style="margin-top:6px;">Optional — install the <strong>RGB Ultra LuCI Theme</strong> (Dark/Light Mode + WCAG contrast guard):</p>
+        <div class="code-box">
+          <pre id="rgbLuciOpkgInstallCmd" class="mono">nslookup github.com >/dev/null 2>&1 || echo "nameserver 1.1.1.1" > /tmp/resolv.conf.auto; curl -fsSL https://github.com/sky12388/aw1000-control/releases/download/v1.0.11/luci-theme-rgb-ultra_1.0.0_all.ipk -o /tmp/luci-theme-rgb-ultra_1.0.0_all.ipk &amp;&amp; opkg install /tmp/luci-theme-rgb-ultra_1.0.0_all.ipk</pre>
+          <button class="copy-btn" data-copy-target="rgbLuciOpkgInstallCmd">Copy</button>
         </div>
 
         <div class="mini-stat" style="padding:13px 15px;margin-top:4px;">
