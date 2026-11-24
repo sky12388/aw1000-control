@@ -84,6 +84,7 @@ case "$1" in
 			json_add_string "radio" "ra0|rai0"
 			json_add_string "ssid" "string"
 			json_add_string "password" "string"
+			json_add_string "auth_mode" "WPA2PSK|WPAPSKWPA2PSK|WPA2PSKWPA3PSK|WPA3PSK|OPEN"
 			json_add_int "channel" 1
 			json_add_int "ht_bw" 0
 		json_close_object
@@ -184,6 +185,8 @@ case "$1" in
 					json_init
 					json_add_object "ra0"
 						json_add_string "ssid" "$(read_dat_key "$DAT_24" "SSID1")"
+						json_add_string "auth" "$(read_dat_key "$DAT_24" "AuthMode" | cut -d';' -f1)"
+						json_add_string "enc" "$(read_dat_key "$DAT_24" "EncrypType" | cut -d';' -f1)"
 						json_add_string "channel" "$(read_dat_key "$DAT_24" "Channel")"
 						json_add_string "ht_bw" "$(read_dat_key "$DAT_24" "HT_BW")"
 						json_add_string "acl_policy" "$(read_dat_key "$DAT_24" "AccessPolicy0")"
@@ -191,6 +194,8 @@ case "$1" in
 					json_close_object
 					json_add_object "rai0"
 						json_add_string "ssid" "$(read_dat_key "$DAT_5G" "SSID1")"
+						json_add_string "auth" "$(read_dat_key "$DAT_5G" "AuthMode" | cut -d';' -f1)"
+						json_add_string "enc" "$(read_dat_key "$DAT_5G" "EncrypType" | cut -d';' -f1)"
 						json_add_string "channel" "$(read_dat_key "$DAT_5G" "Channel")"
 						json_add_string "ht_bw" "$(read_dat_key "$DAT_5G" "HT_BW")"
 						json_add_string "acl_policy" "$(read_dat_key "$DAT_5G" "AccessPolicy0")"
@@ -420,6 +425,7 @@ LUA
 				json_get_var radio radio
 				json_get_var ssid ssid
 				json_get_var password password
+				json_get_var auth_mode auth_mode
 				json_get_var channel channel
 				json_get_var ht_bw ht_bw
 
@@ -451,13 +457,32 @@ LUA
 
 				clean_pass=""
 				pass_updated=0
-				if [ -n "$password" ]; then
+				if [ -n "$password" ] && [ "$auth_mode" != "OPEN" ]; then
 					clean_pass=$(printf '%s' "$password" | tr -d '\r\n')
 					pass_len=${#clean_pass}
 					if [ "$pass_len" -lt 8 ] || [ "$pass_len" -gt 63 ]; then
 						echo '{"ok":false,"error":"WPA passphrase must be 8-63 characters"}'; exit 0
 					fi
 					pass_updated=1
+				fi
+
+				auth_updated=0
+				enc_type=""
+				pmf_c="0"
+				pmf_r="0"
+				if [ -n "$auth_mode" ]; then
+					case "$auth_mode" in
+						WPA2PSK|WPAPSKWPA2PSK)
+							enc_type="AES"; pmf_c="0"; pmf_r="0"; auth_updated=1 ;;
+						WPA2PSKWPA3PSK)
+							enc_type="AES"; pmf_c="1"; pmf_r="0"; auth_updated=1 ;;
+						WPA3PSK)
+							enc_type="AES"; pmf_c="1"; pmf_r="1"; auth_updated=1 ;;
+						OPEN)
+							enc_type="NONE"; pmf_c="0"; pmf_r="0"; auth_updated=1 ;;
+						*)
+							echo '{"ok":false,"error":"Invalid encryption type (allowed: WPA2PSK, WPAPSKWPA2PSK, WPA2PSKWPA3PSK, WPA3PSK, OPEN)"}'; exit 0 ;;
+					esac
 				fi
 
 				ts=$(date +%Y%m%d-%H%M%S)
@@ -467,8 +492,13 @@ LUA
 				}
 
 				tmp_dat="${target}.pwa-tmp"
-				AW_SSID="$clean_ssid" AW_PASS="$clean_pass" awk -v c="$channel" -v b="$ht_bw" -v up="$pass_updated" '
-				BEGIN { s=ENVIRON["AW_SSID"]; p=ENVIRON["AW_PASS"]; seen_s=0; seen_c=0; seen_b=0; seen_p=0 }
+				AW_SSID="$clean_ssid" AW_PASS="$clean_pass" awk -v c="$channel" -v b="$ht_bw" -v up="$pass_updated" -v ua="$auth_updated" -v am="$auth_mode" -v et="$enc_type" -v pc="$pmf_c" -v pr="$pmf_r" '
+				function replace_first(val, newv,   idx) {
+					idx = index(val, ";")
+					if (idx > 0) return newv substr(val, idx)
+					return newv
+				}
+				BEGIN { s=ENVIRON["AW_SSID"]; p=ENVIRON["AW_PASS"]; seen_s=0; seen_c=0; seen_b=0; seen_p=0; seen_a=0; seen_e=0; seen_pc=0; seen_pr=0 }
 				/^SSID1=/ { print "SSID1=" s; seen_s=1; next }
 				/^Channel=/ { print "Channel=" c; seen_c=1; next }
 				/^HT_BW=/ { print "HT_BW=" b; seen_b=1; next }
@@ -476,12 +506,32 @@ LUA
 					if (up == 1) { print "WPAPSK1=" p } else { print $0 }
 					seen_p=1; next
 				}
+				/^AuthMode=/ {
+					if (ua == 1) { print "AuthMode=" replace_first(substr($0, 10), am) } else { print $0 }
+					seen_a=1; next
+				}
+				/^EncrypType=/ {
+					if (ua == 1) { print "EncrypType=" replace_first(substr($0, 12), et) } else { print $0 }
+					seen_e=1; next
+				}
+				/^PMFMFPC=/ {
+					if (ua == 1) { print "PMFMFPC=" pc } else { print $0 }
+					seen_pc=1; next
+				}
+				/^PMFMFPR=/ {
+					if (ua == 1) { print "PMFMFPR=" pr } else { print $0 }
+					seen_pr=1; next
+				}
 				{ print $0 }
 				END {
 					if (!seen_s) print "SSID1=" s
 					if (!seen_c) print "Channel=" c
 					if (!seen_b) print "HT_BW=" b
 					if (up == 1 && !seen_p) print "WPAPSK1=" p
+					if (ua == 1 && !seen_a) print "AuthMode=" am
+					if (ua == 1 && !seen_e) print "EncrypType=" et
+					if (ua == 1 && !seen_pc) print "PMFMFPC=" pc
+					if (ua == 1 && !seen_pr) print "PMFMFPR=" pr
 				}' "$target" > "$tmp_dat" && mv "$tmp_dat" "$target" && chmod 644 "$target" || {
 					rm -f "$tmp_dat"
 					echo '{"ok":false,"error":"Failed to write MediaTek .dat file"}'; exit 0
@@ -494,6 +544,7 @@ LUA
 				json_add_string "backup" "$bak"
 				json_add_string "radio" "$radio"
 				json_add_string "ssid" "$clean_ssid"
+				[ -n "$auth_mode" ] && json_add_string "auth_mode" "$auth_mode"
 				json_add_boolean "password_updated" "$pass_updated"
 				json_dump
 				;;

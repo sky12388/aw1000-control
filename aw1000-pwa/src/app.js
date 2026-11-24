@@ -1104,13 +1104,25 @@ function renderWifiRadioCard(key, radio) {
           </select>
         </div>
         <div class="field">
+          <label>Security / Encryption</label>
+          <select class="select" data-wifi="${key}" data-field="authMode" ${disabled}>
+            ${[
+              { v: "WPA2PSK",        l: "WPA2-PSK (AES) ★ Recommended" },
+              { v: "WPAPSKWPA2PSK",  l: "WPA / WPA2-PSK Mixed (AES)" },
+              { v: "WPA2PSKWPA3PSK", l: "WPA2 / WPA3-PSK Transition (SAE)" },
+              { v: "WPA3PSK",        l: "WPA3-PSK Only (SAE)" },
+              { v: "OPEN",           l: "Open (No Password)" }
+            ].map((opt) => `<option value="${opt.v}" ${(radio.authMode || "WPA2PSK") === opt.v ? "selected" : ""}>${escapeHtml(opt.l)}</option>`).join("")}
+          </select>
+        </div>
+        <div class="field">
           <label>New WPA Passphrase (optional)</label>
           <div style="display:flex; gap:6px; align-items:center;">
             <input class="input" id="wifiPass_${key}" type="${state.wifiPassVisible?.[key] ? "text" : "password"}" autocomplete="new-password" maxlength="63"
-              placeholder="Leave blank to keep current (8-63 chars)"
+              placeholder="${(radio.authMode || "WPA2PSK") === "OPEN" ? "Not used for Open network" : "Leave blank to keep current (8-63 chars)"}"
               value="${escapeHtml(radio.passphrase || "")}"
-              data-wifi="${key}" data-field="passphrase" style="flex:1; min-width:0;" ${disabled}/>
-            <button type="button" class="icon-btn" data-action="toggle-wifi-pass" data-radio="${key}" ${disabled} title="Show or hide passphrase">${state.wifiPassVisible?.[key] ? "Hide" : "Show"}</button>
+              data-wifi="${key}" data-field="passphrase" style="flex:1; min-width:0;" ${disabled || ((radio.authMode || "WPA2PSK") === "OPEN" ? "disabled" : "")}/>
+            <button type="button" class="icon-btn" data-action="toggle-wifi-pass" data-radio="${key}" ${disabled || ((radio.authMode || "WPA2PSK") === "OPEN" ? "disabled" : "")} title="Show or hide passphrase">${state.wifiPassVisible?.[key] ? "Hide" : "Show"}</button>
           </div>
         </div>
       </div>
@@ -3016,32 +3028,46 @@ function setupEvents() {
       const domSsid = document.querySelector(`[data-wifi="${radioKey}"][data-field="ssid"]`);
       const domCh = document.querySelector(`[data-wifi="${radioKey}"][data-field="channel"]`);
       const domBw = document.querySelector(`[data-wifi="${radioKey}"][data-field="htBw"]`);
+      const domAuth = document.querySelector(`[data-wifi="${radioKey}"][data-field="authMode"]`);
       const domPass = document.getElementById(`wifiPass_${radioKey}`);
       if (domSsid) radio.ssid = domSsid.value;
       if (domCh) radio.channel = Number(domCh.value);
       if (domBw) radio.htBw = Number(domBw.value);
+      if (domAuth) radio.authMode = domAuth.value;
       if (domPass) radio.passphrase = domPass.value;
 
       const nextSsid = String(radio.ssid || "").trim();
-      const nextPass = String(radio.passphrase || "");
+      const nextAuth = String(radio.authMode || "WPA2PSK").trim();
+      const nextPass = nextAuth === "OPEN" ? "" : String(radio.passphrase || "");
       if (nextSsid.length < 1 || nextSsid.length > 32) {
         pushToast("SSID must be between 1 and 32 characters.", "danger");
         return;
       }
-      if (nextPass.length > 0 && (nextPass.length < 8 || nextPass.length > 63)) {
+      if (nextAuth !== "OPEN" && nextPass.length > 0 && (nextPass.length < 8 || nextPass.length > 63)) {
         pushToast("WPA passphrase must be 8–63 characters (or leave blank to keep current).", "danger");
         return;
       }
-      const passNote = nextPass.length > 0 ? " + new WPA passphrase" : " (keeping current password)";
+      const authLabelMap = {
+        WPA2PSK: "WPA2-PSK (AES)",
+        WPAPSKWPA2PSK: "WPA/WPA2-PSK Mixed",
+        WPA2PSKWPA3PSK: "WPA2/WPA3-PSK Transition",
+        WPA3PSK: "WPA3-PSK (SAE)",
+        OPEN: "Open (No Password)"
+      };
+      const authLabel = authLabelMap[nextAuth] || nextAuth;
+      const passNote = nextAuth === "OPEN"
+        ? " (Open — no password)"
+        : (nextPass.length > 0 ? " + new WPA passphrase" : " (keeping current password)");
       state.confirmModal = {
         title: `Update ${radio.bandLabel} (${radio.iface}) & Reload Wi-Fi?`,
-        impact: `Writing ${radio.datFile}: SSID "${nextSsid}"${passNote}, Channel ${radio.channel}, HT_BW=${radio.htBw}, then running 'wifi reload'. Wi-Fi will briefly drop for ~5–15 seconds while the MediaTek driver reloads.`,
+        impact: `Writing ${radio.datFile}: SSID "${nextSsid}", Security ${authLabel}${passNote}, Channel ${radio.channel}, HT_BW=${radio.htBw}, then running 'wifi reload'. Wi-Fi will briefly drop for ~5–15 seconds while the MediaTek driver reloads.`,
         lifelineNote: `Automatic backup ${radio.iface}.dat.<timestamp>.pwa-bak is created first. Dropbear SSH and VPN stay up.`,
         onConfirm: async () => {
           if (state.dataSource === "live") {
             const payload = {
               radio: radioKey,
               ssid: nextSsid,
+              auth_mode: nextAuth,
               channel: Number(radio.channel),
               ht_bw: Number(radio.htBw)
             };
@@ -3780,6 +3806,7 @@ function setupEvents() {
     if (wifiKey) {
       const field = e.target.getAttribute("data-field");
       state.wifi[wifiKey][field] = e.target.value;
+      if (field === "authMode") render();
       return;
     }
     const cellField = e.target.getAttribute("data-cell");
@@ -3855,6 +3882,7 @@ function setupEvents() {
     if (wifiKey) {
       const field = e.target.getAttribute("data-field");
       state.wifi[wifiKey][field] = e.target.value;
+      if (field === "authMode") render();
       return;
     }
     const cellField = e.target.getAttribute("data-cell");
@@ -4074,11 +4102,13 @@ function applyLiveTelemetry(tm, cl, st, mg, wg, bl, lg) {
   }
 
   if (wg && typeof wg === "object") {
-    if (wg.ra0 && wg.ra0.acl_list !== undefined) {
-      state.wifi.ra0.aclList = parseAclList(wg.ra0.acl_list);
+    if (wg.ra0) {
+      if (wg.ra0.acl_list !== undefined) state.wifi.ra0.aclList = parseAclList(wg.ra0.acl_list);
+      if (wg.ra0.auth && (!state.editMode || !state.wifi.ra0.authMode)) state.wifi.ra0.authMode = wg.ra0.auth;
     }
-    if (wg.rai0 && wg.rai0.acl_list !== undefined) {
-      state.wifi.rai0.aclList = parseAclList(wg.rai0.acl_list);
+    if (wg.rai0) {
+      if (wg.rai0.acl_list !== undefined) state.wifi.rai0.aclList = parseAclList(wg.rai0.acl_list);
+      if (wg.rai0.auth && (!state.editMode || !state.wifi.rai0.authMode)) state.wifi.rai0.authMode = wg.rai0.auth;
     }
   }
 
