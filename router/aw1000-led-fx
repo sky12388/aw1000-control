@@ -1,8 +1,9 @@
 #!/bin/sh
 # ==============================================================================
-# AW1000 Front-Panel LED FX Controller (12 Animations + Stock + Off)
+# AW1000 Front-Panel LED FX Controller (15 Modes + Stock + Off)
 # Modes: stock | off | knight | comet | ripple | strobe | matrix | stack |
-#        heartbeat | traffic | signal | guardian | mix | random | dance
+#        heartbeat | heartbeat3 | wingtip | smart5g | traffic | signal |
+#        guardian | mix | random | dance
 # Safe: only touches /sys/class/leds/* and /etc/init.d/led_ctrld.init.
 # Never touches SSH, NetBird, Tailscale, firewall, or modem.
 # ==============================================================================
@@ -387,6 +388,78 @@ function fx.guardian(ticks)
 	end
 end
 
+local smart5g_last_ts = 0
+local smart5g_has_5g = false
+local smart5g_sig_col = "red"
+
+local function refresh_smart5g_state()
+	local now = os.time()
+	if (now - smart5g_last_ts) < 4 and smart5g_last_ts > 0 then
+		return
+	end
+	smart5g_last_ts = now
+	local tm = read_telemetry()
+	if not tm or not tm.cell then
+		smart5g_has_5g = false
+		smart5g_sig_col = "red"
+		return
+	end
+	local c = tm.cell
+	local rat = tostring(c.rat or ""):upper()
+	local has_nr_rsrp = (c.nr and type(c.nr.rsrp) == "number")
+	smart5g_has_5g = (rat:find("5G") ~= nil) or (rat:find("NR") ~= nil) or has_nr_rsrp
+
+	local rsrp, sinr = nil, 0
+	if has_nr_rsrp then
+		rsrp = c.nr.rsrp
+		sinr = tonumber(c.nr.sinr) or 0
+	elseif c.lte and type(c.lte.rsrp) == "number" then
+		rsrp = c.lte.rsrp
+		sinr = tonumber(c.lte.sinr) or 0
+	end
+
+	if rsrp == nil then
+		smart5g_sig_col = "red"
+		return
+	end
+
+	local r_norm = math.max(0, math.min(1, (rsrp + 125) / 50))
+	local s_norm = math.max(0, math.min(1, (sinr + 5) / 30))
+	local pct = math.floor(10 + (0.6 * r_norm + 0.4 * s_norm) * 90 + 0.5)
+
+	if pct >= 70 or rsrp >= -90 then
+		smart5g_sig_col = "green"
+	elseif pct >= 35 or rsrp >= -105 then
+		smart5g_sig_col = "amber"
+	else
+		smart5g_sig_col = "red"
+	end
+end
+
+function fx.smart5g(cycles)
+	-- Only controls Slot 3 (5g:signal) & Slot 4 (signal:green + signal:red).
+	-- Slots 1, 2, 5, 6 remain untouched under stock led_ctrld.
+	for _ = 1, (cycles or 3) do
+		refresh_smart5g_state()
+		local col5g = smart5g_has_5g and "green" or "off"
+		local colSig = smart5g_sig_col
+		-- Beat 1 ("lub")
+		set_slot(3, col5g)
+		set_slot(4, colSig)
+		msleep(130)
+		set_slot(3, "off")
+		set_slot(4, "off")
+		msleep(120)
+		-- Beat 2 ("dub")
+		set_slot(3, col5g)
+		set_slot(4, colSig)
+		msleep(130)
+		set_slot(3, "off")
+		set_slot(4, "off")
+		msleep(850)
+	end
+end
+
 local mix_order = { "knight", "comet", "ripple", "matrix", "stack", "dance", "strobe", "heartbeat", "heartbeat3", "wingtip" }
 
 if mode == "mix" then
@@ -422,7 +495,7 @@ LUA
 
 is_valid_mode() {
 	case "$1" in
-		stock|off|knight|comet|ripple|strobe|matrix|stack|heartbeat|heartbeat3|wingtip|traffic|signal|guardian|mix|random|dance) return 0 ;;
+		stock|off|knight|comet|ripple|strobe|matrix|stack|heartbeat|heartbeat3|wingtip|smart5g|traffic|signal|guardian|mix|random|dance) return 0 ;;
 		*) return 1 ;;
 	esac
 }
@@ -469,6 +542,17 @@ case "$cmd" in
 				stop_stock_daemon
 				clear_all_leds
 				echo "off" > "$MODE_FILE"
+				get_state
+				;;
+			smart5g)
+				stop_fx_loop
+				start_stock_daemon
+				for l in 5g:signal signal:green signal:red; do
+					[ -w "/sys/class/leds/$l/trigger" ] && echo "none" > "/sys/class/leds/$l/trigger" 2>/dev/null || true
+				done
+				echo "$mode" > "$MODE_FILE"
+				echo "$mode" > "$LAST_ON_FILE"
+				run_lua_fx "$mode"
 				get_state
 				;;
 			*)
