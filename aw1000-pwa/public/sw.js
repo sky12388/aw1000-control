@@ -6,14 +6,17 @@
 // - Hard Rule #4: Never caches POST /ubus or credentials; caches only static UI.
 // ============================================================================
 
-const CACHE_NAME = "aw1000-pwa-shell-v29";
+const CACHE_NAME = "aw1000-pwa-shell-v30";
 const SHELL_ASSETS = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
   "./manifest.webmanifest",
-  "./icon.svg"
+  "./icon.svg",
+  "./assets/favicon.svg",
+  "./assets/favicon-32x32.png",
+  "./assets/apple-touch-icon.png"
 ];
 
 self.addEventListener("install", (event) => {

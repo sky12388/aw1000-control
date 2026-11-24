@@ -47,9 +47,7 @@ fs.writeFileSync(path.join(distDir, "app.js"), bundledJs, "utf8");
 fs.writeFileSync(path.join(distDir, "styles.css"), stylesCss, "utf8");
 fs.writeFileSync(path.join(distDir, "index.html"), indexHtml, "utf8");
 
-for (const file of fs.readdirSync(pubDir)) {
-  fs.copyFileSync(path.join(pubDir, file), path.join(distDir, file));
-}
+fs.cpSync(pubDir, distDir, { recursive: true });
 
 // Deliverable 1: Create standalone single-file interactive HTML mock (design-mock.html)
 const singleFileMockHtml = `<!DOCTYPE html>
