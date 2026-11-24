@@ -1106,11 +1106,11 @@ function renderWifiRadioCard(key, radio) {
         <div class="field">
           <label>New WPA Passphrase (optional)</label>
           <div style="display:flex; gap:6px; align-items:center;">
-            <input class="input" id="wifiPass_${key}" type="password" autocomplete="new-password" maxlength="63"
+            <input class="input" id="wifiPass_${key}" type="${state.wifiPassVisible?.[key] ? "text" : "password"}" autocomplete="new-password" maxlength="63"
               placeholder="Leave blank to keep current (8-63 chars)"
               value="${escapeHtml(radio.passphrase || "")}"
               data-wifi="${key}" data-field="passphrase" style="flex:1; min-width:0;" ${disabled}/>
-            <button type="button" class="icon-btn" data-action="toggle-wifi-pass" data-radio="${key}" ${disabled} title="Show or hide passphrase">Show</button>
+            <button type="button" class="icon-btn" data-action="toggle-wifi-pass" data-radio="${key}" ${disabled} title="Show or hide passphrase">${state.wifiPassVisible?.[key] ? "Hide" : "Show"}</button>
           </div>
         </div>
       </div>
@@ -2999,16 +2999,28 @@ function setupEvents() {
       render();
     } else if (action === "toggle-wifi-pass") {
       const radioKey = actionEl.getAttribute("data-radio");
+      if (!state.wifiPassVisible) state.wifiPassVisible = { ra0: false, rai0: false };
+      const nextShow = !state.wifiPassVisible[radioKey];
+      state.wifiPassVisible[radioKey] = nextShow;
       const inp = document.getElementById(`wifiPass_${radioKey}`);
       if (inp) {
-        const showing = inp.type === "text";
-        inp.type = showing ? "password" : "text";
-        actionEl.textContent = showing ? "Show" : "Hide";
+        inp.type = nextShow ? "text" : "password";
       }
+      actionEl.textContent = nextShow ? "Hide" : "Show";
     } else if (action === "apply-wifi") {
       if (!state.editMode) return;
       const radioKey = actionEl.getAttribute("data-radio");
       const radio = state.wifi[radioKey];
+      // Always read live DOM values so Android WebView autofill/paste/IME is never missed
+      const domSsid = document.querySelector(`[data-wifi="${radioKey}"][data-field="ssid"]`);
+      const domCh = document.querySelector(`[data-wifi="${radioKey}"][data-field="channel"]`);
+      const domBw = document.querySelector(`[data-wifi="${radioKey}"][data-field="htBw"]`);
+      const domPass = document.getElementById(`wifiPass_${radioKey}`);
+      if (domSsid) radio.ssid = domSsid.value;
+      if (domCh) radio.channel = Number(domCh.value);
+      if (domBw) radio.htBw = Number(domBw.value);
+      if (domPass) radio.passphrase = domPass.value;
+
       const nextSsid = String(radio.ssid || "").trim();
       const nextPass = String(radio.passphrase || "");
       if (nextSsid.length < 1 || nextSsid.length > 32) {
@@ -3021,8 +3033,8 @@ function setupEvents() {
       }
       const passNote = nextPass.length > 0 ? " + new WPA passphrase" : " (keeping current password)";
       state.confirmModal = {
-        title: `Update ${radio.bandLabel} (${radio.iface}) & Restart Wi-Fi?`,
-        impact: `Writing ${radio.datFile}: SSID "${nextSsid}"${passNote}, Channel ${radio.channel}, HT_BW=${radio.htBw}, then running 'wifi restart'. Both 2.4 GHz and 5 GHz Wi-Fi will drop for ~20 seconds while the MediaTek driver reloads.`,
+        title: `Update ${radio.bandLabel} (${radio.iface}) & Reload Wi-Fi?`,
+        impact: `Writing ${radio.datFile}: SSID "${nextSsid}"${passNote}, Channel ${radio.channel}, HT_BW=${radio.htBw}, then running 'wifi reload'. Wi-Fi will briefly drop for ~5–15 seconds while the MediaTek driver reloads.`,
         lifelineNote: `Automatic backup ${radio.iface}.dat.<timestamp>.pwa-bak is created first. Dropbear SSH and VPN stay up.`,
         onConfirm: async () => {
           if (state.dataSource === "live") {
@@ -3035,28 +3047,33 @@ function setupEvents() {
             if (nextPass.length > 0) {
               payload.password = nextPass;
             }
-            const res = await ubusBatchCall([{
-              object: "aw1000",
-              method: "wifi_set",
-              args: payload
-            }]);
-            const r = res?.[0];
-            if (!r || r.code !== 0 || r.data?.ok === false) {
-              const errMsg = r?.data?.error || r?.statusText || "Failed to update Wi-Fi config";
-              pushToast(`Wi-Fi update failed: ${errMsg}`, "danger");
-              if (r?.code === 6) {
-                state.editMode = false;
-                state.loginError = errMsg;
-                state.loginModalOpen = true;
+            try {
+              const res = await ubusBatchCall([{
+                object: "aw1000",
+                method: "wifi_set",
+                args: payload
+              }], 12000);
+              const r = res?.[0];
+              if (handleWriteAuthFailure(r, "Wi-Fi update")) {
                 render();
+                return;
               }
+              if (!r || r.code !== 0 || r.data?.ok === false) {
+                const errMsg = r?.data?.error || r?.statusText || "Failed to update Wi-Fi config";
+                pushToast(`Wi-Fi update failed: ${errMsg}`, "danger");
+                return;
+              }
+            } catch (err) {
+              pushToast(`Wi-Fi update error: ${err?.message || "Router unreachable"}`, "danger");
               return;
             }
           }
           radio.ssid = nextSsid;
           radio.passphrase = "";
+          if (state.wifiPassVisible) state.wifiPassVisible[radioKey] = false;
           radio.widthLabel = Number(radio.htBw) === 0 ? "20 MHz" : (radioKey === "ra0" ? "20/40 MHz" : "80 MHz");
-          pushToast(`Saved ${radio.datFile} (SSID: ${nextSsid}${nextPass ? " + new password" : ""}) & restarting Wi-Fi…`);
+          render();
+          pushToast(`Saved ${radio.datFile} (SSID: ${nextSsid}${nextPass ? " + new WPA password" : ""}). Reloading Wi-Fi…`);
         }
       };
       render();
