@@ -558,6 +558,24 @@ export function createInitialState() {
     opkgFilter: "installed",
     opkgSearch: "",
     opkgConsoleLog: "",
+    rfAutopilotBusy: false,
+    rfAutopilot: {
+      installed: true,
+      enabled: false,
+      running: false,
+      status: "off",
+      ping_ms: null,
+      loss_pct: null,
+      wan_mbps: 0,
+      pci: "-",
+      s1pci: "-",
+      bad_streak: 0,
+      heals_count: 0,
+      cooldown_left: 0,
+      lte_fallback: false,
+      last_action: "Not loaded yet",
+      logs: []
+    },
     ...base
   };
 }

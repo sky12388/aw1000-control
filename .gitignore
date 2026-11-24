@@ -21,6 +21,9 @@
 !router/
 !router/aw1000-telemetry
 !router/aw1000-ctl
+!router/aw1000-led-fx
+!router/aw1000-rf-autopilot
+!router/aw1000-rf-autopilot.initd
 
 # Always ignore build artifacts, signing secrets, dependencies, and personal scripts
 node_modules/

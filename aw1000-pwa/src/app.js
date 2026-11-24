@@ -1533,6 +1533,84 @@ function renderCellularScreen() {
           </div>
         </div>
       </article>
+
+      <!-- 7. RF Autopilot (Self-Healing 5G/4G Guard) -->
+      ${(() => {
+        const ap = state.rfAutopilot || {};
+        const isOn = Boolean(ap.running);
+        const stMap = {
+          healthy:   { cls: "excellent", text: "ACTIVE · HEALTHY" },
+          busy_skip: { cls: "good",      text: "PAUSED (DL > 10 Mbps)" },
+          cooldown:  { cls: "fair",      text: `COOLDOWN (${ap.cooldown_left || 0}s)` },
+          degraded:  { cls: "fair",      text: `WATCHING (${ap.bad_streak || 0}/3)` },
+          healing:   { cls: "poor",      text: "HEALING CELL..." },
+          off:       { cls: "fair",      text: "AUTOPILOT OFF" }
+        };
+        const badge = stMap[ap.status] || (isOn ? stMap.healthy : stMap.off);
+        const logText = Array.isArray(ap.logs) && ap.logs.length
+          ? ap.logs.join("\n")
+          : "No RF Autopilot events logged yet. Enable Autopilot to monitor ping, packet loss & bufferbloat guard (>10 Mbps).";
+        return `
+      <article class="card">
+        <div class="card-accent-bar wifi"></div>
+        <div class="card-header flex-wrap gap-2">
+          <div class="card-title-wrap min-w-0">
+            <div class="card-icon wifi">${ICONS.shield}</div>
+            <div class="card-title-text min-w-0">
+              <h2 class="card-title">RF Autopilot (Self-Healing 5G/4G Guard)</h2>
+              <p class="card-subtitle">Bufferbloat filter (&gt;10 Mbps skip) · 3× hysteresis · B28-safe cell hop &amp; 30m LTE fallback</p>
+            </div>
+          </div>
+          <span class="qual-badge ${badge.cls} whitespace-nowrap shrink-0">
+            <span class="qual-dot"></span>
+            <span>${escapeHtml(badge.text)}</span>
+          </span>
+        </div>
+
+        <div class="rf-grid tabular" style="margin-bottom:4px;">
+          <div class="rf-stat">
+            <span class="rf-stat-label">Last Ping / Loss</span>
+            <span class="rf-stat-val">${ap.ping_ms != null ? `${ap.ping_ms} ms` : "—"} · ${ap.loss_pct != null ? `${ap.loss_pct}%` : "—"}</span>
+          </div>
+          <div class="rf-stat">
+            <span class="rf-stat-label">WAN Guard Rate</span>
+            <span class="rf-stat-val">${ap.wan_mbps != null ? `${ap.wan_mbps} Mbps` : "0.0 Mbps"}</span>
+          </div>
+          <div class="rf-stat">
+            <span class="rf-stat-label">PCI (LTE / NR)</span>
+            <span class="rf-stat-val">${escapeHtml(String(ap.pci || "-"))} / ${escapeHtml(String(ap.s1pci || "-"))}</span>
+          </div>
+          <div class="rf-stat">
+            <span class="rf-stat-label">Heals / Fallback</span>
+            <span class="rf-stat-val">${ap.heals_count || 0} · ${ap.lte_fallback ? "4G Fallback" : "5G NSA"}</span>
+          </div>
+        </div>
+
+        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+          <button class="btn ${isOn ? "btn-danger-signal" : "btn-primary-wifi"}"
+            data-action="rf-autopilot-toggle" ${(disabled || state.rfAutopilotBusy) ? "disabled" : ""}>
+            ${state.rfAutopilotBusy ? "Working..." : (isOn ? "Disable RF Autopilot" : "Enable RF Autopilot")}
+          </button>
+          <button class="btn btn-secondary" data-action="rf-autopilot-heal"
+            ${(disabled || state.rfAutopilotBusy) ? "disabled" : ""}>
+            Run Probe Now
+          </button>
+          <button class="icon-btn" data-action="rf-autopilot-refresh">
+            ${ICONS.refresh} Refresh
+          </button>
+          <button class="icon-btn" data-action="rf-autopilot-clear" ${disabled}>
+            Clear Log
+          </button>
+        </div>
+
+        <div class="card-subtitle" style="font-size:0.78rem;">
+          Last event: <strong>${escapeHtml(ap.last_action || "—")}</strong>
+        </div>
+
+        <pre class="opkg-console mono" style="max-height:190px;">${escapeHtml(logText)}</pre>
+      </article>
+        `;
+      })()}
     </div>
   `;
 }
@@ -2697,7 +2775,7 @@ function setupEvents() {
     const navBtn = e.target.closest("[data-nav]");
     if (navBtn) {
       state.activeTab = navBtn.getAttribute("data-nav");
-      if (state.dataSource === "live" && (state.activeTab === "sms" || state.activeTab === "system" || state.activeTab === "software")) {
+      if (state.dataSource === "live" && (state.activeTab === "sms" || state.activeTab === "system" || state.activeTab === "software" || state.activeTab === "cellular")) {
         refreshTabSpecificLive(state.activeTab);
       }
       render();
@@ -3399,6 +3477,54 @@ function setupEvents() {
         }
         render();
       }
+    } else if (action === "rf-autopilot-refresh") {
+      await refreshTabSpecificLive("cellular");
+    } else if (action === "rf-autopilot-toggle" || action === "rf-autopilot-heal" || action === "rf-autopilot-clear") {
+      if (!state.editMode) {
+        pushToast("Unlock Edit Mode to control RF Autopilot.");
+        return;
+      }
+      const act = action === "rf-autopilot-toggle"
+        ? (state.rfAutopilot?.running ? "disable" : "enable")
+        : (action === "rf-autopilot-heal" ? "heal_now" : "clear_log");
+      state.rfAutopilotBusy = true;
+      render();
+      if (state.dataSource === "live") {
+        try {
+          const [res] = await ubusBatchCall([{
+            object: "aw1000",
+            method: "rf_autopilot_set",
+            args: { action: act }
+          }], 25000);
+          state.rfAutopilotBusy = false;
+          if (handleWriteAuthFailure(res, `rf_autopilot ${act}`)) {
+            render();
+            return;
+          }
+          if (!res || res.code !== 0 || res.data?.ok === false) {
+            pushToast(`RF Autopilot error: ${res?.data?.error || res?.statusText || "Failed"}`);
+          } else {
+            const labels = {
+              enable: "RF Autopilot enabled & running.",
+              disable: "RF Autopilot stopped & disabled.",
+              heal_now: "Manual RF probe completed.",
+              clear_log: "RF Autopilot log cleared."
+            };
+            pushToast(labels[act] || "Done.");
+            await refreshTabSpecificLive("cellular");
+          }
+        } catch (err) {
+          state.rfAutopilotBusy = false;
+          pushToast(`RF Autopilot error: ${err?.message || "Timeout"}`);
+        }
+      } else {
+        state.rfAutopilotBusy = false;
+        if (act === "enable") { state.rfAutopilot.running = true; state.rfAutopilot.enabled = true; state.rfAutopilot.status = "healthy"; }
+        if (act === "disable") { state.rfAutopilot.running = false; state.rfAutopilot.enabled = false; state.rfAutopilot.status = "off"; }
+        if (act === "clear_log") { state.rfAutopilot.logs = []; }
+        pushToast(`RF Autopilot: ${act} (Mock Mode).`);
+      }
+      render();
     } else if (action === "svc-refresh") {
       await refreshTabSpecificLive("software");
     } else if (action === "svc-action") {
@@ -4015,6 +4141,12 @@ async function refreshTabSpecificLive(tab) {
           enabled: res[2].data.enabled !== false,
           lastMode: res[2].data.last_mode || "stock"
         };
+      }
+      render();
+    } else if (tab === "cellular") {
+      const [res] = await ubusBatchCall([{ object: "aw1000", method: "rf_autopilot_get" }], 10000);
+      if (res && res.code === 0 && res.data && res.data.ok) {
+        state.rfAutopilot = res.data;
       }
       render();
     } else if (tab === "software") {

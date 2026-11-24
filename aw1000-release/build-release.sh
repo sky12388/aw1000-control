@@ -26,6 +26,7 @@ mkdir -p "$WORK/data/www/app" \
          "$WORK/data/usr/libexec/rpcd" \
          "$WORK/data/usr/share/rpcd/acl.d" \
          "$WORK/data/usr/bin" \
+         "$WORK/data/etc/init.d" \
          "$WORK/control" \
          "$WORK/ipk"
 
@@ -57,19 +58,23 @@ cp "$PWA_DIR/rpcd/aw1000-pwa.json" "$WORK/data/usr/share/rpcd/acl.d/aw1000-pwa.j
 cp "$ROOT/router/aw1000-telemetry" "$WORK/data/usr/bin/aw1000-telemetry"
 cp "$ROOT/router/aw1000-ctl" "$WORK/data/usr/bin/aw1000-ctl"
 cp "$ROOT/router/aw1000-led-fx" "$WORK/data/usr/bin/aw1000-led-fx"
+cp "$ROOT/router/aw1000-rf-autopilot" "$WORK/data/usr/bin/aw1000-rf-autopilot"
+cp "$ROOT/router/aw1000-rf-autopilot.initd" "$WORK/data/etc/init.d/aw1000-rf-autopilot"
 
 chmod 755 "$WORK/data/www/cgi-bin/ubus" \
           "$WORK/data/usr/libexec/rpcd/aw1000" \
           "$WORK/data/usr/libexec/rpcd/aw1000-svc" \
           "$WORK/data/usr/bin/aw1000-telemetry" \
           "$WORK/data/usr/bin/aw1000-ctl" \
-          "$WORK/data/usr/bin/aw1000-led-fx"
+          "$WORK/data/usr/bin/aw1000-led-fx" \
+          "$WORK/data/usr/bin/aw1000-rf-autopilot" \
+          "$WORK/data/etc/init.d/aw1000-rf-autopilot"
 chmod 644 "$WORK/data/usr/share/rpcd/acl.d/aw1000-pwa.json"
 find "$WORK/data" -type d -exec chmod 755 {} +
 find "$WORK/data/www/app" -type f -exec chmod 644 {} +
 
 # 1. Router tarball for install.sh
-tar -C "$WORK/data" --owner=0 --group=0 -czf "$REL_DIR/aw1000-control-router-v${VERSION}.tar.gz" www usr
+tar -C "$WORK/data" --owner=0 --group=0 -czf "$REL_DIR/aw1000-control-router-v${VERSION}.tar.gz" www usr etc
 
 echo "[4/5] Building OpenWrt .ipk package (aw1000-control_${VERSION}_all.ipk)..."
 INSTALLED_SIZE=$(du -sk "$WORK/data" | awk '{print $1}')

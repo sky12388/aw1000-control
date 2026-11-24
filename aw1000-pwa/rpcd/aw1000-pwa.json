@@ -34,7 +34,8 @@
           "sms_list",
           "backup_list",
           "logs_get",
-          "led_get"
+          "led_get",
+          "rf_autopilot_get"
         ],
         "aw1000-svc": [
           "svc_list",
@@ -67,7 +68,8 @@
           "modem_reregister",
           "modem_restart",
           "backup_create",
-          "led_set"
+          "led_set",
+          "rf_autopilot_set"
         ],
         "aw1000-svc": [
           "svc_action",

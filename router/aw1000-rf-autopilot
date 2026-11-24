@@ -1,0 +1,231 @@
+#!/bin/sh
+# ==============================================================================
+# /usr/bin/aw1000-rf-autopilot — Self-Healing 5G/4G RF Autopilot for AW1000 FG360
+#
+# 5 FG360 Refinements:
+#   1. ccmni1/WAN Throughput Bufferbloat Filter: skips heal whenever live WAN
+#      rate > 10 Mbps so active downloads/streams are NEVER interrupted.
+#   2. Multi-Sample Hysteresis: requires 3 consecutive bad probes (ping >= 150ms
+#      or packet loss >= 15%) before taking action.
+#   3. Graduated FG360 Recovery Ladder: never drops B28 anchor; tries soft cell
+#      hop (PCI 302 on EARFCN 9510) -> unlock/re-attach -> 4G LTE-only fallback
+#      (3-comma AT+GTACT=2,,,101,103,107,128) with 30m auto-return to 5G NSA.
+#   4. Cooldown & Backoff Guard: 180s cooldown between heals, max 6 heals/hour.
+#   5. Zero-Wear RAM State: state JSON & 60-line circular log live in /tmp only.
+#
+# HARD SAFETY: NEVER touches SSH (dropbear), NetBird, Tailscale, or firewall.
+# ==============================================================================
+
+STATE_FILE="/tmp/aw1000-rf-autopilot.json"
+LOG_FILE="/tmp/aw1000-rf-autopilot.log"
+PID_FILE="/var/run/aw1000-rf-autopilot.pid"
+MODEM="/bin/modem_status"
+
+POLL_SEC=15
+BAD_PING_MS=150
+BAD_LOSS_PCT=15
+BUSY_MBPS=10
+STREAK_TRIGGER=3
+COOLDOWN_SEC=180
+LTE_RETURN_SEC=1800
+MAX_HEALS_PER_HR=6
+
+log_line() {
+	ts="$(date '+%H:%M:%S')"
+	printf '[%s] %s\n' "$ts" "$1" >> "$LOG_FILE"
+	# Keep circular log <= 60 lines in /tmp (zero eMMC wear)
+	if [ -f "$LOG_FILE" ]; then
+		tail -n 60 "$LOG_FILE" > "${LOG_FILE}.tmp" 2>/dev/null && mv "${LOG_FILE}.tmp" "$LOG_FILE"
+	fi
+}
+
+find_wan_iface() {
+	dev="$(ip route show default 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
+	[ -n "$dev" ] && echo "$dev" || echo "ccmni1"
+}
+
+read_wan_bytes() {
+	ifc="$1"
+	rx="$(cat "/sys/class/net/$ifc/statistics/rx_bytes" 2>/dev/null || echo 0)"
+	tx="$(cat "/sys/class/net/$ifc/statistics/tx_bytes" 2>/dev/null || echo 0)"
+	awk -v r="$rx" -v t="$tx" 'BEGIN{printf "%.0f", r + t}'
+}
+
+measure_mbps() {
+	ifc="$1"
+	b1="$(read_wan_bytes "$ifc")"
+	sleep 2
+	b2="$(read_wan_bytes "$ifc")"
+	awk -v a="$b1" -v b="$b2" 'BEGIN{d=b-a; if(d<0) d=0; printf "%.1f", (d*8)/(2*1000000)}'
+}
+
+probe_ping() {
+	out="$(ping -c 4 -W 2 1.1.1.1 2>&1)"
+	loss="$(printf '%s\n' "$out" | sed -n 's/.* \([0-9]*\)% packet loss.*/\1/p' | head -n 1)"
+	avg="$(printf '%s\n' "$out" | sed -n 's/.*= [0-9.]*\/\([0-9.]*\)\/.*/\1/p' | head -n 1)"
+	[ -z "$loss" ] && loss=100
+	[ -z "$avg" ] && avg=999
+	avg_int="$(printf '%s' "$avg" | cut -d. -f1)"
+	[ -z "$avg_int" ] && avg_int=999
+	echo "$avg_int $loss"
+}
+
+get_rf_brief() {
+	info="$(/usr/share/3ginfo-lite/3ginfo.sh 2>/dev/null)"
+	pci="$(printf '%s\n' "$info" | sed -n 's/.*"pci":"\([^"]*\)".*/\1/p' | head -n 1)"
+	s1pci="$(printf '%s\n' "$info" | sed -n 's/.*"s1pci":"\([^"]*\)".*/\1/p' | head -n 1)"
+	rsrq="$(printf '%s\n' "$info" | sed -n 's/.*"rsrq":"\([^"]*\)".*/\1/p' | head -n 1)"
+	mode="$(printf '%s\n' "$info" | sed -n 's/.*"mode":"\([^"]*\)".*/\1/p' | head -n 1)"
+	echo "${pci:-0}|${s1pci:-0}|${rsrq:-0}|${mode:-Unknown}"
+}
+
+write_state() {
+	status="$1"; ping_ms="$2"; loss_pct="$3"; mbps="$4"; pci="$5"; s1pci="$6"
+	mode="$7"; streak="$8"; heals="$9"; cd_left="${10}"; last_act="${11}"; fallback="${12}"
+	esc_mode="$(printf '%s' "$mode" | sed 's/"/\\"/g')"
+	esc_act="$(printf '%s' "$last_act" | sed 's/"/\\"/g')"
+	cat <<EOF > "${STATE_FILE}.tmp"
+{"ok":true,"status":"$status","ping_ms":$ping_ms,"loss_pct":$loss_pct,"wan_mbps":$mbps,"pci":"$pci","s1pci":"$s1pci","mode":"$esc_mode","bad_streak":$streak,"heals_count":$heals,"cooldown_left":$cd_left,"lte_fallback":$fallback,"last_action":"$esc_act","updated_ts":$(date +%s)}
+EOF
+	mv "${STATE_FILE}.tmp" "$STATE_FILE"
+}
+
+do_heal_step() {
+	cur_pci="$1"; cur_step="$2"
+	if [ "$cur_step" -eq 1 ]; then
+		if [ "$cur_pci" != "302" ]; then
+			log_line "HEAL Step 1: Hopping off congested PCI $cur_pci -> locking B28 PCI 302 (EARFCN 9510)"
+			"$MODEM" --set_celllock "4,9510/302" >/dev/null 2>&1 || "$MODEM" --run_atcmd "AT+GTCELLLOCK=1,0,0,9510,302" >/dev/null 2>&1 || true
+			echo "Hopped to B28 PCI 302 (9510)"
+		else
+			log_line "HEAL Step 1: Soft radio re-register on PCI $cur_pci (AT+CFUN=4 -> 1)"
+			"$MODEM" --run_atcmd "AT+CFUN=4" >/dev/null 2>&1 || true
+			sleep 2
+			"$MODEM" --run_atcmd "AT+CFUN=1" >/dev/null 2>&1 || true
+			echo "Soft radio re-register (CFUN 4->1)"
+		fi
+	elif [ "$cur_step" -eq 2 ]; then
+		log_line "HEAL Step 2: Unlocking cell lock so FG360 selects cleanest sector"
+		"$MODEM" --set_celllock "0,0,0" >/dev/null 2>&1 || true
+		"$MODEM" --run_atcmd "AT+GTCELLLOCK=0" >/dev/null 2>&1 || true
+		echo "Unlocked cell lock for clean re-attach"
+	else
+		log_line "HEAL Step 3: Switching to 4G LTE-Only fallback (AT+GTACT=2,,,101,103,107,128) for 30m"
+		"$MODEM" --set_celllock "0,0,0" >/dev/null 2>&1 || true
+		"$MODEM" --run_atcmd "AT+GTCELLLOCK=0" >/dev/null 2>&1 || true
+		"$MODEM" --run_atcmd "AT+GTACT=2,,,101,103,107,128" >/dev/null 2>&1 || true
+		echo "4G LTE-Only fallback (30m auto-return to 5G)"
+	fi
+}
+
+run_once_check() {
+	ifc="$(find_wan_iface)"
+	mbps="$(measure_mbps "$ifc")"
+	rf="$(get_rf_brief)"
+	pci="$(echo "$rf" | cut -d'|' -f1)"
+	s1pci="$(echo "$rf" | cut -d'|' -f2)"
+	mode="$(echo "$rf" | cut -d'|' -f4)"
+	res="$(probe_ping)"
+	p_ms="$(echo "$res" | awk '{print $1}')"
+	p_loss="$(echo "$res" | awk '{print $2}')"
+	busy="$(awk -v m="$mbps" -v lim="$BUSY_MBPS" 'BEGIN{print (m > lim) ? 1 : 0}')"
+	if [ "$busy" = "1" ]; then
+		log_line "MANUAL CHECK: Busy ($mbps Mbps > ${BUSY_MBPS} Mbps on $ifc) — bufferbloat guard skipped heal (ping=${p_ms}ms loss=${p_loss}%)"
+		write_state "busy_skip" "$p_ms" "$p_loss" "$mbps" "$pci" "$s1pci" "$mode" 0 0 0 "Skipped (active transfer ${mbps} Mbps)" "false"
+	elif [ "$p_loss" -ge "$BAD_LOSS_PCT" ] || [ "$p_ms" -ge "$BAD_PING_MS" ]; then
+		act="$(do_heal_step "$pci" 1)"
+		write_state "healing" "$p_ms" "$p_loss" "$mbps" "$pci" "$s1pci" "$mode" 0 1 "$COOLDOWN_SEC" "$act" "false"
+	else
+		log_line "MANUAL CHECK: Healthy (ping=${p_ms}ms loss=${p_loss}% wan=${mbps}Mbps PCI=${pci}/${s1pci})"
+		write_state "healthy" "$p_ms" "$p_loss" "$mbps" "$pci" "$s1pci" "$mode" 0 0 0 "Healthy check (${p_ms}ms, ${p_loss}% loss)" "false"
+	fi
+}
+
+run_daemon() {
+	echo "$$" > "$PID_FILE"
+	log_line "RF Autopilot started (bufferbloat guard >${BUSY_MBPS} Mbps, trigger ${STREAK_TRIGGER}x bad probes, ${COOLDOWN_SEC}s cooldown)"
+	streak=0
+	heals=0
+	hr_start="$(date +%s)"
+	hr_heals=0
+	last_heal_ts=0
+	heal_step=0
+	lte_fallback_ts=0
+	last_action="Monitoring started"
+
+	while true; do
+		now="$(date +%s)"
+		if [ $((now - hr_start)) -ge 3600 ]; then
+			hr_start="$now"
+			hr_heals=0
+		fi
+
+		# Auto-return from 4G LTE-Only fallback to 5G NSA after 30 minutes
+		if [ "$lte_fallback_ts" -gt 0 ] && [ $((now - lte_fallback_ts)) -ge "$LTE_RETURN_SEC" ]; then
+			log_line "AUTO-RETURN: Restoring 5G NSA (AT+GTACT=17,6,,101,103,107,128,5078) after 30m LTE fallback"
+			"$MODEM" --run_atcmd "AT+GTACT=17,6,,101,103,107,128,5078" >/dev/null 2>&1 || true
+			lte_fallback_ts=0
+			heal_step=0
+			last_heal_ts="$now"
+			last_action="Auto-returned to 5G NSA"
+		fi
+
+		ifc="$(find_wan_iface)"
+		mbps="$(measure_mbps "$ifc")"
+		rf="$(get_rf_brief)"
+		pci="$(echo "$rf" | cut -d'|' -f1)"
+		s1pci="$(echo "$rf" | cut -d'|' -f2)"
+		mode="$(echo "$rf" | cut -d'|' -f4)"
+		res="$(probe_ping)"
+		p_ms="$(echo "$res" | awk '{print $1}')"
+		p_loss="$(echo "$res" | awk '{print $2}')"
+
+		cd_left=$((COOLDOWN_SEC - (now - last_heal_ts)))
+		[ "$cd_left" -lt 0 ] && cd_left=0
+		fb_flag="false"
+		[ "$lte_fallback_ts" -gt 0 ] && fb_flag="true"
+
+		busy="$(awk -v m="$mbps" -v lim="$BUSY_MBPS" 'BEGIN{print (m > lim) ? 1 : 0}')"
+		if [ "$busy" = "1" ]; then
+			streak=0
+			write_state "busy_skip" "$p_ms" "$p_loss" "$mbps" "$pci" "$s1pci" "$mode" "$streak" "$heals" "$cd_left" "$last_action" "$fb_flag"
+		elif [ "$p_loss" -ge "$BAD_LOSS_PCT" ] || [ "$p_ms" -ge "$BAD_PING_MS" ]; then
+			streak=$((streak + 1))
+			log_line "DEGRADED (${streak}/${STREAK_TRIGGER}): ping=${p_ms}ms loss=${p_loss}% wan=${mbps}Mbps PCI=${pci}/${s1pci}"
+			if [ "$streak" -ge "$STREAK_TRIGGER" ] && [ "$cd_left" -eq 0 ] && [ "$hr_heals" -lt "$MAX_HEALS_PER_HR" ]; then
+				heal_step=$(( (heal_step % 3) + 1 ))
+				last_action="$(do_heal_step "$pci" "$heal_step")"
+				heals=$((heals + 1))
+				hr_heals=$((hr_heals + 1))
+				last_heal_ts="$now"
+				streak=0
+				if [ "$heal_step" -eq 3 ]; then
+					lte_fallback_ts="$now"
+					fb_flag="true"
+				fi
+				write_state "healing" "$p_ms" "$p_loss" "$mbps" "$pci" "$s1pci" "$mode" "$streak" "$heals" "$COOLDOWN_SEC" "$last_action" "$fb_flag"
+			else
+				st="degraded"
+				[ "$cd_left" -gt 0 ] && st="cooldown"
+				write_state "$st" "$p_ms" "$p_loss" "$mbps" "$pci" "$s1pci" "$mode" "$streak" "$heals" "$cd_left" "$last_action" "$fb_flag"
+			fi
+		else
+			if [ "$streak" -gt 0 ]; then
+				log_line "RECOVERED: ping=${p_ms}ms loss=${p_loss}% PCI=${pci}/${s1pci}"
+			fi
+			streak=0
+			st="healthy"
+			[ "$cd_left" -gt 0 ] && st="cooldown"
+			write_state "$st" "$p_ms" "$p_loss" "$mbps" "$pci" "$s1pci" "$mode" "$streak" "$heals" "$cd_left" "$last_action" "$fb_flag"
+		fi
+
+		sleep "$POLL_SEC"
+	done
+}
+
+case "${1:-run}" in
+	run)      run_daemon ;;
+	once)     run_once_check ;;
+	clear)    : > "$LOG_FILE"; log_line "Log cleared by user." ;;
+	*)        echo "Usage: $0 run|once|clear" >&2; exit 1 ;;
+esac

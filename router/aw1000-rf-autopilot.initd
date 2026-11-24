@@ -1,0 +1,17 @@
+#!/bin/sh /etc/rc.common
+
+START=98
+STOP=10
+USE_PROCD=1
+
+PROG=/usr/bin/aw1000-rf-autopilot
+
+start_service() {
+	[ -x "$PROG" ] || return 1
+	procd_open_instance rf_autopilot
+	procd_set_param command "$PROG" run
+	procd_set_param respawn 3600 10 0
+	procd_set_param stdout 0
+	procd_set_param stderr 0
+	procd_close_instance
+}

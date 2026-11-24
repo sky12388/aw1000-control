@@ -43,6 +43,8 @@ chown -R root:root /www/app /www/cgi-bin/ubus /usr/libexec/rpcd/aw1000 /usr/libe
 chmod 755 /www/app /www/cgi-bin/ubus /usr/libexec/rpcd/aw1000 /usr/bin/aw1000-telemetry /usr/bin/aw1000-ctl
 [ -f /usr/libexec/rpcd/aw1000-svc ] && chmod 755 /usr/libexec/rpcd/aw1000-svc || true
 [ -f /usr/bin/aw1000-led-fx ] && chmod 755 /usr/bin/aw1000-led-fx || true
+[ -f /usr/bin/aw1000-rf-autopilot ] && chmod 755 /usr/bin/aw1000-rf-autopilot || true
+[ -f /etc/init.d/aw1000-rf-autopilot ] && chmod 755 /etc/init.d/aw1000-rf-autopilot || true
 chmod 644 /www/app/* /usr/share/rpcd/acl.d/aw1000-pwa.json
 
 echo "[3/4] Registering least-privilege 'pwa' rpcd account..."

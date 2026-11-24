@@ -78,6 +78,8 @@ case "$1" in
 		json_close_object
 		json_add_object "led_get"
 		json_close_object
+		json_add_object "rf_autopilot_get"
+		json_close_object
 		json_add_object "wifi_set"
 			json_add_string "radio" "ra0|rai0"
 			json_add_string "ssid" "string"
@@ -128,6 +130,9 @@ case "$1" in
 		json_close_object
 		json_add_object "led_set"
 			json_add_string "mode" "stock|off|knight|comet|ripple|strobe|matrix|stack|heartbeat|heartbeat3|wingtip|traffic|signal|guardian|mix|random|dance"
+		json_close_object
+		json_add_object "rf_autopilot_set"
+			json_add_string "action" "enable|disable|heal_now|clear_log"
 		json_close_object
 		json_dump
 		;;
@@ -948,6 +953,100 @@ LUA
 				else
 					echo '{"ok":false,"error":"/usr/bin/aw1000-led-fx not installed"}'
 				fi
+				;;
+
+			rf_autopilot_get)
+				/usr/bin/lua - <<'LUA'
+local json = require("luci.jsonc")
+local function read_file(p)
+	local f = io.open(p, "r")
+	if not f then return nil end
+	local s = f:read("*a")
+	f:close()
+	return s
+end
+local st_raw = read_file("/tmp/aw1000-rf-autopilot.json")
+local st = st_raw and json.parse(st_raw) or {}
+local enabled = (os.execute("/etc/init.d/aw1000-rf-autopilot enabled >/dev/null 2>&1") == 0)
+local pid = read_file("/var/run/aw1000-rf-autopilot.pid")
+pid = pid and pid:match("(%d+)") or nil
+local running = false
+if pid then
+	running = (os.execute("kill -0 " .. pid .. " >/dev/null 2>&1") == 0)
+end
+local logs = {}
+local log_raw = read_file("/tmp/aw1000-rf-autopilot.log") or ""
+for line in log_raw:gmatch("[^\r\n]+") do
+	table.insert(logs, line)
+end
+while #logs > 25 do table.remove(logs, 1) end
+io.write(json.stringify({
+	ok = true,
+	installed = (os.execute("[ -x /usr/bin/aw1000-rf-autopilot ]") == 0),
+	enabled = enabled,
+	running = running,
+	status = running and (st.status or "healthy") or "off",
+	ping_ms = st.ping_ms,
+	loss_pct = st.loss_pct,
+	wan_mbps = st.wan_mbps,
+	pci = st.pci or "-",
+	s1pci = st.s1pci or "-",
+	mode = st.mode or "-",
+	bad_streak = st.bad_streak or 0,
+	heals_count = st.heals_count or 0,
+	cooldown_left = st.cooldown_left or 0,
+	lte_fallback = st.lte_fallback == true,
+	last_action = st.last_action or (running and "Monitoring" or "Autopilot disabled"),
+	logs = logs
+}) .. "\n")
+LUA
+				;;
+
+			rf_autopilot_set)
+				read -r input
+				json_load "$input" 2>/dev/null || true
+				json_get_var act action 2>/dev/null || true
+				case "$act" in
+					enable)
+						if [ -x /etc/init.d/aw1000-rf-autopilot ]; then
+							/etc/init.d/aw1000-rf-autopilot enable >/dev/null 2>&1 || true
+							/etc/init.d/aw1000-rf-autopilot restart >/dev/null 2>&1 || true
+							sleep 1
+							echo '{"ok":true,"action":"enable","enabled":true,"running":true}'
+						else
+							echo '{"ok":false,"error":"/etc/init.d/aw1000-rf-autopilot not installed"}'
+						fi
+						;;
+					disable)
+						if [ -x /etc/init.d/aw1000-rf-autopilot ]; then
+							/etc/init.d/aw1000-rf-autopilot stop >/dev/null 2>&1 || true
+							/etc/init.d/aw1000-rf-autopilot disable >/dev/null 2>&1 || true
+							rm -f /var/run/aw1000-rf-autopilot.pid
+							echo '{"ok":true,"action":"disable","enabled":false,"running":false}'
+						else
+							echo '{"ok":false,"error":"/etc/init.d/aw1000-rf-autopilot not installed"}'
+						fi
+						;;
+					heal_now)
+						if [ -x /usr/bin/aw1000-rf-autopilot ]; then
+							/usr/bin/aw1000-rf-autopilot once >/dev/null 2>&1 || true
+							echo '{"ok":true,"action":"heal_now"}'
+						else
+							echo '{"ok":false,"error":"/usr/bin/aw1000-rf-autopilot not installed"}'
+						fi
+						;;
+					clear_log)
+						if [ -x /usr/bin/aw1000-rf-autopilot ]; then
+							/usr/bin/aw1000-rf-autopilot clear >/dev/null 2>&1 || true
+						else
+							: > /tmp/aw1000-rf-autopilot.log
+						fi
+						echo '{"ok":true,"action":"clear_log"}'
+						;;
+					*)
+						echo '{"ok":false,"error":"Invalid action (use enable|disable|heal_now|clear_log)"}'
+						;;
+				esac
 				;;
 		esac
 		;;
