@@ -1367,6 +1367,24 @@ function renderCellularScreen() {
           </span>
         </div>
 
+        <div style="display:flex; flex-direction:column; gap:6px; padding:10px 12px; border-radius:12px; background:var(--bg-subtle); border:1px solid var(--border-subtle);">
+          <span class="card-subtitle" style="font-size:0.75rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em;">Quick Band &amp; Cell Lock Presets</span>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+            <button type="button" class="btn btn-primary-wifi" style="min-height:36px; padding:6px 12px; font-size:0.80rem;"
+              data-action="band-cell-quick" data-lock-preset="best_5g_anchor" ${disabled}>
+              ⚡ Best 5G Anchor (B28 PCI 302 + n78)
+            </button>
+            <button type="button" class="btn btn-primary-net" style="min-height:36px; padding:6px 12px; font-size:0.80rem;"
+              data-action="band-cell-quick" data-lock-preset="stable_5g_nsa" ${disabled}>
+              📶 Stable 5G NSA (B1/B3/B7/B28 + n78)
+            </button>
+            <button type="button" class="btn btn-secondary" style="min-height:36px; padding:6px 12px; font-size:0.80rem;"
+              data-action="band-cell-quick" data-lock-preset="unlock_all" ${disabled}>
+              🔓 Unlock All / Auto
+            </button>
+          </div>
+        </div>
+
         <div class="band-lock-group">
           <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
             <span class="rf-stat-label">LTE Bands (4G Anchor &amp; CA)</span>
@@ -3185,6 +3203,90 @@ function setupEvents() {
         state.cellular.selectedNrBands = Array.from(cur).sort((a, b) => a - b);
       }
       state.cellular.bandSelectionDirty = true;
+      render();
+    } else if (action === "band-cell-quick") {
+      if (!state.editMode) {
+        pushToast("Unlock Edit Mode to apply Band & Cell Lock presets.");
+        return;
+      }
+      const preset = actionEl.getAttribute("data-lock-preset");
+      if (!preset) return;
+      const cfg = {
+        best_5g_anchor: {
+          title: "Lock Best 5G Anchor (B28 PCI 302 + n78)?",
+          impact: "Locks bands to LTE B1/B3/B7/B28 + 5G NR n78 and locks LTE anchor to B28 PCI 302 (EARFCN 9510). Cellular WAN drops briefly (~10–20s).",
+          calls: [
+            { object: "aw1000", method: "band_lock", args: { arg: "4,1/3/7/28;5,78" } },
+            { object: "aw1000", method: "cell_lock", args: { arg: "4,9510/302" } }
+          ],
+          lte: [1, 3, 7, 28],
+          nr: [78],
+          cellLock: "4,9510/302",
+          doneMsg: "Applied Best 5G Anchor (B28 PCI 302 + n78)."
+        },
+        stable_5g_nsa: {
+          title: "Apply Stable 5G NSA (B1/B3/B7/B28 + n78, Unlocked PCI)?",
+          impact: "Unlocks any PCI cell lock and locks bands to LTE B1/B3/B7/B28 + 5G NR n78 (WCDMA off). Cellular WAN drops briefly (~10–20s).",
+          calls: [
+            { object: "aw1000", method: "cell_lock", args: { arg: "unlock" } },
+            { object: "aw1000", method: "band_lock", args: { arg: "4,1/3/7/28;5,78" } }
+          ],
+          lte: [1, 3, 7, 28],
+          nr: [78],
+          cellLock: "0",
+          doneMsg: "Applied Stable 5G NSA (B1/B3/B7/B28 + n78, PCI unlocked)."
+        },
+        unlock_all: {
+          title: "Unlock All Bands & PCI Cell Lock (Auto)?",
+          impact: "Clears PCI cell lock (AT+GTCELLLOCK=0) and restores all 5G/4G/3G bands (AT+GTACT=20,6,3).",
+          calls: [
+            { object: "aw1000", method: "cell_lock", args: { arg: "unlock" } },
+            { object: "aw1000", method: "band_lock", args: { arg: "unlock" } }
+          ],
+          lte: [],
+          nr: [],
+          cellLock: "0",
+          doneMsg: "Unlocked all bands & PCI cell lock (Auto)."
+        }
+      }[preset];
+      if (!cfg) return;
+      state.confirmModal = {
+        title: cfg.title,
+        impact: cfg.impact,
+        lifelineNote: "Local Wi-Fi, LAN SSH, and NetBird stay intact; WAN reconnects automatically.",
+        onConfirm: async () => {
+          if (state.dataSource === "live") {
+            try {
+              const results = await ubusBatchCall(cfg.calls, 25000);
+              for (const r of results || []) {
+                if (handleWriteAuthFailure(r, `band-cell-quick ${preset}`)) {
+                  render();
+                  return;
+                }
+                if (!r || r.code !== 0 || r.data?.ok === false) {
+                  pushToast(`Preset failed: ${r?.data?.error || r?.statusText || "Modem rejected command"}`, "danger");
+                  return;
+                }
+                if (r.data?.gtact) state.cellular.gtact = r.data.gtact;
+              }
+            } catch (err) {
+              pushToast(`Preset error: ${err?.message || "Router unreachable"}`, "danger");
+              return;
+            }
+          }
+          if (cfg.lte.length || cfg.nr.length) {
+            state.cellular.selectedLteBands = cfg.lte;
+            state.cellular.selectedNrBands = cfg.nr;
+          }
+          state.cellular.bandSelectionDirty = false;
+          state.cellular.gtCellLock = cfg.cellLock;
+          pushToast(cfg.doneMsg);
+          render();
+          if (state.dataSource === "live") {
+            await refreshTabSpecificLive("cellular");
+          }
+        }
+      };
       render();
     } else if (action === "apply-band-lock") {
       if (!state.editMode) return;
