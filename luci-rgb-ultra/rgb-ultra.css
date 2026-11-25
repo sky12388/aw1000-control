@@ -726,6 +726,63 @@ html[data-theme="dark"] .rgb-startup-count{
   background:#1e293b!important;color:#38bdf8!important;border:1px solid rgba(56,189,248,.3)!important;
 }
 
+/* 3ginfo-lite / Lock Band page: replace puffy 999px white pills with sleek 5px chips & hide empty status pills */
+html[data-theme="dark"] .ginfo-page{
+  background:#0b0f19!important;background-image:none!important;color:#f1f5f9!important;
+}
+html[data-theme="dark"] .ginfo-page .cbi-section{
+  background:#131829!important;color:#f1f5f9!important;
+}
+html[data-theme="dark"] .ginfo-page .ginfo-band-list>span,
+html[data-theme="light"] .ginfo-page .ginfo-band-list>span{
+  border-radius:5px!important;padding:4px 9px!important;line-height:1.2!important;
+  margin:0 6px 6px 0!important;font-size:12px!important;font-weight:700!important;
+}
+html[data-theme="dark"] .ginfo-page .ginfo-band-list>span{
+  background:#1a2138!important;border:1px solid #475569!important;color:#f1f5f9!important;
+}
+html[data-theme="dark"] .ginfo-page .ginfo-band-list>span:hover{
+  background:#243154!important;border-color:#38bdf8!important;
+}
+html[data-theme="light"] .ginfo-page .ginfo-band-list>span{
+  background:#e2e8f0!important;border:1px solid #cbd5e1!important;color:#0f172a!important;
+}
+html[data-theme="light"] .ginfo-page .ginfo-band-list>span:hover{
+  background:#cbd5e1!important;border-color:#94a3b8!important;
+}
+html[data-theme="dark"] .ginfo-page .ginfo-current-bands>span,
+html[data-theme="light"] .ginfo-page .ginfo-current-bands>span{
+  border-radius:5px!important;padding:3px 8px!important;min-height:auto!important;
+  line-height:1.2!important;margin:0 5px 5px 0!important;font-size:12px!important;font-weight:750!important;
+}
+html[data-theme="dark"] .ginfo-page .ginfo-current-bands>span{
+  background:#1e293b!important;border:1px solid rgba(56,189,248,.45)!important;color:#38bdf8!important;
+}
+html[data-theme="light"] .ginfo-page .ginfo-current-bands>span{
+  background:#e0f2fe!important;border:1px solid #7dd3fc!important;color:#0369a1!important;
+}
+html[data-theme="dark"] .ginfo-page .ginfo-status:empty,
+html[data-theme="light"] .ginfo-page .ginfo-status:empty{
+  display:none!important;
+}
+html[data-theme="dark"] .ginfo-page .ginfo-status,
+html[data-theme="light"] .ginfo-page .ginfo-status{
+  border-radius:5px!important;padding:4px 9px!important;min-height:auto!important;
+  line-height:1.2!important;font-size:12px!important;font-weight:700!important;
+}
+html[data-theme="dark"] .ginfo-page .ginfo-status{
+  background:#1a2138!important;border:1px solid rgba(56,189,248,.35)!important;color:#38bdf8!important;
+}
+html[data-theme="light"] .ginfo-page .ginfo-status{
+  background:#e0f2fe!important;border:1px solid #7dd3fc!important;color:#0369a1!important;
+}
+html[data-theme="dark"] .ginfo-page .cbi-button,
+html[data-theme="dark"] .ginfo-page .btn,
+html[data-theme="light"] .ginfo-page .cbi-button,
+html[data-theme="light"] .ginfo-page .btn{
+  border-radius:5px!important;min-height:auto!important;padding:4px 10px!important;line-height:1.2!important;
+}
+
 /* Mobile (< 768px): tight compact tabs, buttons & badges with clean 4px wrap gap */
 @media (max-width:767px){
   .tabs,#tabmenu ul.tabs,.cbi-tabmenu{gap:4px!important}
