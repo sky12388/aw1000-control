@@ -55,6 +55,18 @@ ul.nav>li.active>a,ul.nav>li:hover>a{
   background:linear-gradient(90deg,#ff2d6f,#7c3aed)!important;color:#fff!important;
   box-shadow:0 0 16px rgba(255,45,111,.6)!important;
 }
+/* Fix top nav dropdown hover-gap: flush top:100% + invisible ::before bridge + mobile .open */
+header ul.nav>li,ul.nav>li.dropdown{position:relative!important}
+header ul.nav>li>ul.dropdown-menu,ul.nav>li>ul.dropdown-menu{
+  top:100%!important;margin-top:0!important;z-index:9999!important;
+}
+header ul.nav>li>ul.dropdown-menu::before,ul.nav>li>ul.dropdown-menu::before{
+  content:"";position:absolute;top:-8px;left:0;right:0;height:8px;
+}
+header ul.nav>li.open>ul.dropdown-menu,header ul.nav>li:hover>ul.dropdown-menu,
+ul.nav>li.open>ul.dropdown-menu,ul.nav>li:hover>ul.dropdown-menu{
+  display:block!important;left:0!important;
+}
 
 /* ===================== DARK / LIGHT TOGGLE ===================== */
 .rgb-theme-control{display:flex;align-items:center;margin-left:12px;flex:0 0 auto}
