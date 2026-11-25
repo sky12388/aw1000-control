@@ -50,6 +50,7 @@ cp "$PWA_DIR/dist/index.html" \
    "$PWA_DIR/dist/manifest.webmanifest" \
    "$PWA_DIR/dist/sw.js" \
    "$WORK/data/www/app/"
+[ -d "$PWA_DIR/dist/assets" ] && cp -r "$PWA_DIR/dist/assets" "$WORK/data/www/app/"
 
 cp "$PWA_DIR/rpcd/aw1000-cgi-ubus" "$WORK/data/www/cgi-bin/ubus"
 cp "$PWA_DIR/rpcd/aw1000" "$WORK/data/usr/libexec/rpcd/aw1000"
