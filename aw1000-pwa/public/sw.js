@@ -6,7 +6,7 @@
 // - Hard Rule #4: Never caches POST /ubus or credentials; caches only static UI.
 // ============================================================================
 
-const CACHE_NAME = "aw1000-pwa-shell-v35";
+const CACHE_NAME = "aw1000-pwa-shell-v36";
 const SHELL_ASSETS = [
   "./",
   "./index.html",

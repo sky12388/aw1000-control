@@ -1994,6 +1994,27 @@ function handleWriteAuthFailure(res, label = "Action") {
   return false;
 }
 
+async function runWriteRpc(calls, label = "Action", timeoutMs = 20000) {
+  try {
+    const results = await ubusBatchCall(calls, timeoutMs);
+    for (const r of results || []) {
+      if (handleWriteAuthFailure(r, label)) {
+        render();
+        return null;
+      }
+      if (!r || r.code !== 0 || r.error || (r.data && r.data.ok === false)) {
+        const msg = r?.data?.error || r?.statusText || r?.error?.message || "Router rejected request";
+        pushToast(`${label} failed: ${msg}`, "danger");
+        return null;
+      }
+    }
+    return results;
+  } catch (err) {
+    pushToast(`${label} error: ${err?.message || "Router timeout or unreachable"}`, "danger");
+    return null;
+  }
+}
+
 function renderSoftwareScreen() {
   if (state.dataSource === "live" && state.liveLoading) {
     return renderLoadingSkeleton();
@@ -2978,10 +2999,12 @@ function setupEvents() {
         lifelineNote: `Old IMEI (${state.cellular.imei || "current"}) is backed up to /root/aw1000-imei-backups/imei-history.log. Router, Wi-Fi, and SSH stay up.`,
         onConfirm: async () => {
           if (state.dataSource === "live") {
-            await ubusBatchCall([{ object: "aw1000", method: "imei_set", args: { imei: candidate } }]);
+            const results = await runWriteRpc([{ object: "aw1000", method: "imei_set", args: { imei: candidate } }], "IMEI update", 20000);
+            if (!results) return;
           }
           state.cellular.imei = candidate;
           pushToast(`IMEI updated to ${candidate} and FG360 modem restarted.`);
+          render();
         }
       };
       render();
@@ -3004,11 +3027,13 @@ function setupEvents() {
         lifelineNote: "Backs up /etc/config/3ginfo_ttl first. Never touches /etc/firewall.user, SSH, NetBird, or Tailscale chains.",
         onConfirm: async () => {
           if (state.dataSource === "live") {
-            await ubusBatchCall([{ object: "aw1000", method: "ttl_set", args: { ttl: isOff ? "off" : String(ttlNum) } }]);
+            const results = await runWriteRpc([{ object: "aw1000", method: "ttl_set", args: { ttl: isOff ? "off" : String(ttlNum) } }], "TTL update", 15000);
+            if (!results) return;
           }
           state.cellular.ttlEnabled = !isOff;
           if (!isOff) state.cellular.ttlVal = ttlNum;
           pushToast(isOff ? "TTL Spoofing disabled." : `TTL / Hop Limit set to ${ttlNum}.`);
+          render();
         }
       };
       render();
@@ -3029,11 +3054,12 @@ function setupEvents() {
         lifelineNote: "Automatic .acl-bak backup created before write. Anti-Lockout verified; SSH & VPN stay up.",
         onConfirm: async () => {
           if (state.dataSource === "live") {
-            await ubusBatchCall([{
+            const results = await runWriteRpc([{
               object: "aw1000",
               method: "mac_acl",
               args: { mac, action: nextAct, client_ip: state.router.callerIp || "" }
-            }]);
+            }], "MAC ACL update", 15000);
+            if (!results) return;
           }
           const cur = new Set((state.wifi.ra0.aclList || []).map((m) => m.toUpperCase()));
           if (nextAct === "block") cur.add(mac); else cur.delete(mac);
@@ -3165,11 +3191,9 @@ function setupEvents() {
         lifelineNote: "Local Wi-Fi and LAN SSH remain up; VPN reconnects automatically once registered.",
         onConfirm: async () => {
           if (state.dataSource === "live") {
-            const [res] = await ubusBatchCall([{ object: "aw1000", method: "modem_mode", args: { mode } }]);
-            if (!res || res.error || (res.data && res.data.ok === false)) {
-              pushToast(`Mode switch failed: ${res?.data?.error || res?.error || "Access denied or AT error"}`);
-              return;
-            }
+            const results = await runWriteRpc([{ object: "aw1000", method: "modem_mode", args: { mode } }], "Mode switch", 20000);
+            if (!results) return;
+            const res = results[0];
             if (res.data?.gtact) {
               state.cellular.gtactRaw = res.data.gtact;
               const parsed = parseGtactBands(res.data.gtact);
@@ -3311,19 +3335,17 @@ function setupEvents() {
         lifelineNote: "Use 'Clear All Locks' anytime to restore all factory LTE + 5G bands.",
         onConfirm: async () => {
           if (state.dataSource === "live") {
-            const [res] = await ubusBatchCall([{ object: "aw1000", method: "band_lock", args: { arg } }]);
-            if (!res || res.error || (res.data && res.data.ok === false)) {
-              pushToast(`Band lock failed: ${res?.data?.error || res?.error || "Access denied or AT error"}`);
-              return;
-            }
+            const results = await runWriteRpc([{ object: "aw1000", method: "band_lock", args: { arg } }], "Band lock", 20000);
+            if (!results) return;
+            const res = results[0];
             const gtact = String(res.data?.gtact || "").trim();
             if (!gtact) {
-              pushToast("Band lock failed: missing AT+GTACT? readback from router.");
+              pushToast("Band lock failed: missing AT+GTACT? readback from router.", "danger");
               return;
             }
             const parsed = parseGtactBands(gtact);
             if (!sameSet(lte, parsed.lte) || !sameSet(nr, parsed.nr)) {
-              pushToast(`Band lock mismatch: modem reports ${gtact}`);
+              pushToast(`Band lock mismatch: modem reports ${gtact}`, "danger");
               return;
             }
             state.cellular.gtactRaw = gtact;
@@ -3346,14 +3368,16 @@ function setupEvents() {
         lifelineNote: "Safest recovery option if a band or PCI lock degrades signal.",
         onConfirm: async () => {
           if (state.dataSource === "live") {
-            await ubusBatchCall([
+            const results = await runWriteRpc([
               { object: "aw1000", method: "cell_lock", args: { arg: "unlock" } },
               { object: "aw1000", method: "band_lock", args: { arg: "all" } }
-            ]);
+            ], "Clear locks", 20000);
+            if (!results) return;
           }
           state.cellular.gtCellLock = "0";
           state.cellular.bandSelectionDirty = false;
           pushToast("Cleared all band and cell locks.");
+          render();
           setTimeout(() => pollTick(true), 5000);
         }
       };
@@ -3371,14 +3395,12 @@ function setupEvents() {
         lifelineNote: "Tap 'Unlock' or 'Clear All Locks' anytime to release the PCI lock.",
         onConfirm: async () => {
           if (state.dataSource === "live") {
-            const [res] = await ubusBatchCall([{ object: "aw1000", method: "cell_lock", args: { arg } }]);
-            if (res?.data && res.data.ok === false) {
-              pushToast(`Cell lock failed: ${res.data.error || "Unknown error"}`);
-              return;
-            }
+            const results = await runWriteRpc([{ object: "aw1000", method: "cell_lock", args: { arg } }], "Cell lock", 20000);
+            if (!results) return;
           }
           state.cellular.gtCellLock = arg;
           pushToast(`Locked serving cell: ${arg}`);
+          render();
           setTimeout(() => pollTick(true), 4000);
         }
       };
@@ -3391,10 +3413,12 @@ function setupEvents() {
         lifelineNote: "No reboot required; WAN stays connected.",
         onConfirm: async () => {
           if (state.dataSource === "live") {
-            await ubusBatchCall([{ object: "aw1000", method: "cell_lock", args: { arg: "unlock" } }]);
+            const results = await runWriteRpc([{ object: "aw1000", method: "cell_lock", args: { arg: "unlock" } }], "Unlock cell", 20000);
+            if (!results) return;
           }
           state.cellular.gtCellLock = "0";
           pushToast("Cell PCI lock cleared.");
+          render();
           setTimeout(() => pollTick(true), 3000);
         }
       };
@@ -3412,15 +3436,12 @@ function setupEvents() {
         lifelineNote: "LAN access stays up; remote VPN overlay resumes automatically once ccmni2 reconnects.",
         onConfirm: async () => {
           if (state.dataSource === "live") {
-            const [res] = await ubusBatchCall([{
+            const results = await runWriteRpc([{
               object: "aw1000",
               method: "apn_set",
               args: { apn: cleanApn, iptype: state.cellular.pdpType || "IPv4v6" }
-            }]);
-            if (res?.data && res.data.ok === false) {
-              pushToast(`APN update failed: ${res.data.error || "Unknown error"}`);
-              return;
-            }
+            }], "APN update", 20000);
+            if (!results) return;
           }
           pushToast(`APN saved ('${cleanApn}', ${state.cellular.pdpType}) — restarting WAN…`);
           setTimeout(() => pollTick(true), 5000);
@@ -3435,7 +3456,8 @@ function setupEvents() {
         lifelineNote: "Local LAN and SSH remain active; VPN reconnects automatically.",
         onConfirm: async () => {
           if (state.dataSource === "live") {
-            await ubusBatchCall([{ object: "aw1000", method: "modem_reregister", args: {} }]);
+            const results = await runWriteRpc([{ object: "aw1000", method: "modem_reregister", args: {} }], "Modem re-register", 20000);
+            if (!results) return;
           }
           pushToast("Modem re-registration (CFUN=0 → 1) triggered.");
         }
@@ -3449,7 +3471,8 @@ function setupEvents() {
         lifelineNote: "Local Wi-Fi and LAN SSH remain active; remote VPN reconnects as soon as WAN is up.",
         onConfirm: async () => {
           if (state.dataSource === "live") {
-            await ubusBatchCall([{ object: "aw1000", method: "modem_restart", args: { full: true } }]);
+            const results = await runWriteRpc([{ object: "aw1000", method: "modem_restart", args: { full: true } }], "Full modem reset", 20000);
+            if (!results) return;
           }
           pushToast("Full FG360 modem reset (CFUN=1,1) triggered.");
         }
@@ -3463,7 +3486,8 @@ function setupEvents() {
         lifelineNote: "Local Wi-Fi and LAN SSH remain active; remote VPN reconnects as soon as WAN is up.",
         onConfirm: async () => {
           if (state.dataSource === "live") {
-            await ubusBatchCall([{ object: "aw1000", method: "modem_restart", args: {} }]);
+            const results = await runWriteRpc([{ object: "aw1000", method: "modem_restart", args: {} }], "Modem restart", 20000);
+            if (!results) return;
           }
           pushToast("FG360 modem radio restart triggered.");
         }
@@ -3477,7 +3501,8 @@ function setupEvents() {
         lifelineNote: "Read-only archive creation; SSH, Wi-Fi, and VPN stay up.",
         onConfirm: async () => {
           if (state.dataSource === "live") {
-            await ubusBatchCall([{ object: "aw1000", method: "backup_create", args: { tag: "pwa" } }]);
+            const results = await runWriteRpc([{ object: "aw1000", method: "backup_create", args: { tag: "pwa" } }], "USB backup", 30000);
+            if (!results) return;
             await refreshTabSpecificLive("system");
           } else {
             const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
@@ -3500,11 +3525,9 @@ function setupEvents() {
         ? (curMode === "off" ? lastMode : "off")
         : (actionEl.getAttribute("data-led-mode") || "stock");
       if (state.dataSource === "live") {
-        const [res] = await ubusBatchCall([{ object: "aw1000", method: "led_set", args: { mode: targetMode } }]);
-        if (!res || res.error || (res.data && res.data.ok === false)) {
-          pushToast(`LED switch failed: ${res?.data?.error || res?.error || "Access denied"}`);
-          return;
-        }
+        const results = await runWriteRpc([{ object: "aw1000", method: "led_set", args: { mode: targetMode } }], "LED switch", 12000);
+        if (!results) return;
+        const res = results[0];
         state.led = {
           mode: res.data?.mode || targetMode,
           enabled: res.data?.enabled !== false,
@@ -3531,7 +3554,8 @@ function setupEvents() {
         lifelineNote: "Hardened boot config ensures dropbear SSH and VPN start automatically on boot.",
         onConfirm: async () => {
           if (state.dataSource === "live") {
-            await ubusBatchCall([{ object: "system", method: "reboot", args: {} }]);
+            const results = await runWriteRpc([{ object: "system", method: "reboot", args: {} }], "Router reboot", 12000);
+            if (!results) return;
           }
           pushToast("Router reboot command issued.");
         }

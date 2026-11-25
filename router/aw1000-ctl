@@ -78,6 +78,7 @@ modem_get() {
 	case "$RAT:$E5" in
 		2:*)   MODE="4g" ;;
 		14:*)  MODE="5g-sa" ;;
+		17:*)  MODE="5g-nsa" ;;
 		*:5)   MODE="5g-nsa" ;;
 		*:3)   MODE="5g-sa" ;;
 		*:1)   MODE="4g" ;;
