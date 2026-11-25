@@ -1615,6 +1615,24 @@ function renderCellularScreen() {
           </button>
         </div>
 
+        <div style="display:flex; flex-direction:column; gap:6px; padding:10px 12px; border-radius:12px; background:var(--bg-subtle); border:1px solid var(--border-subtle);">
+          <span class="card-subtitle" style="font-size:0.75rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em;">Quick RF Mode Presets</span>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+            <button class="btn btn-primary-wifi" style="min-height:36px; padding:6px 12px; font-size:0.80rem;"
+              data-action="rf-autopilot-quick" data-rf-preset="force_5g" ${(disabled || state.rfAutopilotBusy) ? "disabled" : ""}>
+              1. Force 5G (n78 + B1/B2/B7/B28)
+            </button>
+            <button class="btn btn-secondary" style="min-height:36px; padding:6px 12px; font-size:0.80rem;"
+              data-action="rf-autopilot-quick" data-rf-preset="lte_only" ${(disabled || state.rfAutopilotBusy) ? "disabled" : ""}>
+              2. LTE Only
+            </button>
+            <button class="btn btn-secondary" style="min-height:36px; padding:6px 12px; font-size:0.80rem;"
+              data-action="rf-autopilot-quick" data-rf-preset="auto" ${(disabled || state.rfAutopilotBusy) ? "disabled" : ""}>
+              3. Auto
+            </button>
+          </div>
+        </div>
+
         <div class="card-subtitle" style="font-size:0.78rem;">
           Last event: <strong>${escapeHtml(ap.last_action || "—")}</strong>
         </div>
@@ -3523,6 +3541,48 @@ function setupEvents() {
       }
     } else if (action === "rf-autopilot-refresh") {
       await refreshTabSpecificLive("cellular");
+    } else if (action === "rf-autopilot-quick") {
+      if (!state.editMode) {
+        pushToast("Unlock Edit Mode to switch RF mode.");
+        return;
+      }
+      const preset = actionEl.getAttribute("data-rf-preset");
+      if (!preset) return;
+      const presetLabels = {
+        force_5g: "Force 5G (n78 + B1/B2/B7/B28)",
+        lte_only: "LTE Only",
+        auto: "Auto (5G + 4G All Bands)"
+      };
+      state.rfAutopilotBusy = true;
+      render();
+      if (state.dataSource === "live") {
+        try {
+          const [res] = await ubusBatchCall([{
+            object: "aw1000",
+            method: "rf_autopilot_set",
+            args: { action: preset }
+          }], 20000);
+          state.rfAutopilotBusy = false;
+          if (handleWriteAuthFailure(res, `rf_autopilot ${preset}`)) {
+            render();
+            return;
+          }
+          if (!res || res.code !== 0 || res.data?.ok === false) {
+            pushToast(`RF preset error: ${res?.data?.error || res?.statusText || "Failed"}`, "danger");
+          } else {
+            if (res.data?.gtact) state.cellular.gtact = res.data.gtact;
+            pushToast(`Applied: ${presetLabels[preset] || preset}`);
+            await refreshTabSpecificLive("cellular");
+          }
+        } catch (err) {
+          state.rfAutopilotBusy = false;
+          pushToast(`RF preset error: ${err?.message || "Router unreachable"}`, "danger");
+        }
+      } else {
+        state.rfAutopilotBusy = false;
+        pushToast(`Applied: ${presetLabels[preset] || preset} (Mock Mode).`);
+      }
+      render();
     } else if (action === "rf-autopilot-toggle" || action === "rf-autopilot-heal" || action === "rf-autopilot-clear") {
       if (!state.editMode) {
         pushToast("Unlock Edit Mode to control RF Autopilot.");

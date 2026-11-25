@@ -223,9 +223,33 @@ run_daemon() {
 	done
 }
 
+apply_quick_mode() {
+	qmode="$1"
+	"$MODEM" --set_celllock "0,0,0" >/dev/null 2>&1 || true
+	"$MODEM" --run_atcmd "AT+GTCELLLOCK=0" >/dev/null 2>&1 || true
+	case "$qmode" in
+		force_5g)
+			"$MODEM" --run_atcmd "AT+E5GOPT=7" >/dev/null 2>&1 || true
+			"$MODEM" --run_atcmd "AT+GTACT=17,6,,101,102,107,128,5078" >/dev/null 2>&1 || true
+			log_line "QUICK: Force 5G (n78 + B1/B2/B7/B28) -> AT+GTACT=17,6,,101,102,107,128,5078"
+			;;
+		lte_only)
+			"$MODEM" --run_atcmd "AT+E5GOPT=1" >/dev/null 2>&1 || true
+			"$MODEM" --run_atcmd "AT+GTACT=2" >/dev/null 2>&1 || true
+			log_line "QUICK: LTE Only -> AT+GTACT=2 (E5GOPT=1)"
+			;;
+		auto)
+			"$MODEM" --run_atcmd "AT+E5GOPT=7" >/dev/null 2>&1 || true
+			"$MODEM" --run_atcmd "AT+GTACT=20,6,3" >/dev/null 2>&1 || true
+			log_line "QUICK: Auto (5G + 4G All Bands) -> AT+GTACT=20,6,3 (E5GOPT=7)"
+			;;
+	esac
+}
+
 case "${1:-run}" in
 	run)      run_daemon ;;
 	once)     run_once_check ;;
 	clear)    : > "$LOG_FILE"; log_line "Log cleared by user." ;;
-	*)        echo "Usage: $0 run|once|clear" >&2; exit 1 ;;
+	force_5g|lte_only|auto) apply_quick_mode "$1" ;;
+	*)        echo "Usage: $0 run|once|clear|force_5g|lte_only|auto" >&2; exit 1 ;;
 esac

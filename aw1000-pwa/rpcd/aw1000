@@ -133,7 +133,7 @@ case "$1" in
 			json_add_string "mode" "stock|off|knight|comet|ripple|strobe|matrix|stack|heartbeat|heartbeat3|wingtip|smart5g|traffic|signal|guardian|mix|random|dance"
 		json_close_object
 		json_add_object "rf_autopilot_set"
-			json_add_string "action" "enable|disable|heal_now|clear_log"
+			json_add_string "action" "enable|disable|heal_now|clear_log|force_5g|lte_only|auto"
 		json_close_object
 		json_dump
 		;;
@@ -1096,8 +1096,19 @@ LUA
 						fi
 						echo '{"ok":true,"action":"clear_log"}'
 						;;
+					force_5g|lte_only|auto)
+						if [ -x /usr/bin/aw1000-rf-autopilot ]; then
+							/usr/bin/aw1000-rf-autopilot "$act" >/dev/null 2>&1 || true
+						fi
+						cur_gt=$(/bin/modem_status --run_atcmd 'AT+GTACT?' 2>/dev/null | sed -n 's/.*+GTACT:[[:space:]]*//p' | tr -d '\r' | head -n1)
+						json_init
+						json_add_boolean "ok" 1
+						json_add_string "action" "$act"
+						[ -n "$cur_gt" ] && json_add_string "gtact" "$cur_gt"
+						json_dump
+						;;
 					*)
-						echo '{"ok":false,"error":"Invalid action (use enable|disable|heal_now|clear_log)"}'
+						echo '{"ok":false,"error":"Invalid action (use enable|disable|heal_now|clear_log|force_5g|lte_only|auto)"}'
 						;;
 				esac
 				;;
