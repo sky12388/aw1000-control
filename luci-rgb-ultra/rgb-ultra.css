@@ -126,7 +126,7 @@ html[data-theme="light"] #rgb-theme-toggle{
    ================================================================ */
 html[data-theme="dark"]{color-scheme:dark}
 
-/* 1) All bootstrap light surfaces -> dark slate */
+/* 1) All bootstrap & legacy Lua CBI light surfaces -> dark slate */
 html[data-theme="dark"] body,
 html[data-theme="dark"] #maincontent,
 html[data-theme="dark"] .container,
@@ -136,6 +136,22 @@ html[data-theme="dark"] .cbi-section-node,
 html[data-theme="dark"] .cbi-value,
 html[data-theme="dark"] .cbi-tabmenu,
 html[data-theme="dark"] .cbi-page-actions,
+html[data-theme="dark"] .cbi-section-table,
+html[data-theme="dark"] .cbi-section-table-titles,
+html[data-theme="dark"] .cbi-section-table-descr,
+html[data-theme="dark"] .cbi-section-table-row,
+html[data-theme="dark"] .cbi-rowstyle-1,
+html[data-theme="dark"] .cbi-rowstyle-2,
+html[data-theme="dark"] .cbi-tblsection,
+html[data-theme="dark"] fieldset,
+html[data-theme="dark"] legend,
+html[data-theme="dark"] table,
+html[data-theme="dark"] thead,
+html[data-theme="dark"] tbody,
+html[data-theme="dark"] tfoot,
+html[data-theme="dark"] tr,
+html[data-theme="dark"] td,
+html[data-theme="dark"] th,
 html[data-theme="dark"] .table,
 html[data-theme="dark"] .tr,
 html[data-theme="dark"] .td,
@@ -144,10 +160,20 @@ html[data-theme="dark"] .alert-message,
 html[data-theme="dark"] .modal,
 html[data-theme="dark"] .modal-body,
 html[data-theme="dark"] .modal-content,
+html[data-theme="dark"] .modal-header,
+html[data-theme="dark"] .modal-footer,
 html[data-theme="dark"] .dropdown-menu,
+html[data-theme="dark"] ul.dropdown-menu,
+html[data-theme="dark"] ul.dropdown-menu li,
+html[data-theme="dark"] ul.dropdown-menu li a,
+html[data-theme="dark"] .well,
+html[data-theme="dark"] .panel,
+html[data-theme="dark"] .card,
+html[data-theme="dark"] .box,
 html[data-theme="dark"] pre,
 html[data-theme="dark"] code{
   background:#131829!important;
+  background-color:#131829!important;
   color:#f1f5f9!important;
   border-color:rgba(148,163,184,.28)!important;
 }
@@ -158,19 +184,30 @@ html[data-theme="dark"] .modal,
 html[data-theme="dark"] .modal-body,
 html[data-theme="dark"] .modal-content,
 html[data-theme="dark"] .dropdown-menu,
-html[data-theme="dark"] .ginfo-dashboard{background:#0b0f19!important}
-/* raised tiles / table headers */
+html[data-theme="dark"] ul.dropdown-menu,
+html[data-theme="dark"] .ginfo-dashboard{background:#0b0f19!important;background-color:#0b0f19!important}
+/* raised tiles / table headers / alternating rows */
 html[data-theme="dark"] .cbi-section-node,
 html[data-theme="dark"] .cbi-value,
+html[data-theme="dark"] .cbi-rowstyle-1,
 html[data-theme="dark"] .tr,
 html[data-theme="dark"] .td,
 html[data-theme="dark"] .th,
+html[data-theme="dark"] tr,
+html[data-theme="dark"] td,
+html[data-theme="dark"] th,
 html[data-theme="dark"] pre,
-html[data-theme="dark"] code{background:#1a2138!important}
+html[data-theme="dark"] code{background:#1a2138!important;background-color:#1a2138!important}
+html[data-theme="dark"] .cbi-rowstyle-2,
+html[data-theme="dark"] table tr:nth-child(even) td{background:#131829!important;background-color:#131829!important}
 html[data-theme="dark"] .th,
-html[data-theme="dark"] .cbi-section-table .th{color:#38bdf8!important;font-weight:900!important}
+html[data-theme="dark"] th,
+html[data-theme="dark"] .cbi-section-table .th,
+html[data-theme="dark"] .cbi-section-table-titles th{color:#38bdf8!important;font-weight:900!important;background:#0f172a!important}
+html[data-theme="dark"] table tr:hover td,
 html[data-theme="dark"] .table tr:hover td,
-html[data-theme="dark"] .table .tr:hover .td{background:#243154!important}
+html[data-theme="dark"] .table .tr:hover .td,
+html[data-theme="dark"] ul.dropdown-menu li a:hover{background:#243154!important;color:#ffffff!important}
 
 /* 2) Global high-contrast typography */
 html[data-theme="dark"] body,
@@ -205,17 +242,29 @@ html[data-theme="dark"] .ginfo-title span{
 html[data-theme="dark"] a{color:#38bdf8!important}
 html[data-theme="dark"] a:visited{color:#7dd3fc!important}
 
-/* 3) Form controls */
-html[data-theme="dark"] input,
+/* 3) Form controls (exclude button/submit/reset inputs so styled buttons stay readable) */
+html[data-theme="dark"] input:not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="checkbox"]):not([type="radio"]),
 html[data-theme="dark"] select,
 html[data-theme="dark"] textarea,
 html[data-theme="dark"] .cbi-input-text,
 html[data-theme="dark"] .cbi-input-password,
-html[data-theme="dark"] .cbi-input-select{
+html[data-theme="dark"] .cbi-input-select,
+html[data-theme="dark"] .cbi-dropdown:not(.btn):not(.cbi-button){
   background:#0f172a!important;
+  background-color:#0f172a!important;
   color:#f8fafc!important;
   border:1px solid #475569!important;
   border-radius:6px!important;
+}
+html[data-theme="dark"] .cbi-dropdown > ul > li,
+html[data-theme="dark"] .cbi-dropdown > ul > li > span{
+  background:#0f172a!important;
+  color:#f8fafc!important;
+}
+html[data-theme="dark"] .cbi-dropdown[open] > ul.dropdown > li:hover,
+html[data-theme="dark"] .cbi-dropdown[open] > ul.dropdown > li[selected]{
+  background:#1e293b!important;
+  color:#38bdf8!important;
 }
 html[data-theme="dark"] input::placeholder,
 html[data-theme="dark"] textarea::placeholder{color:#94a3b8!important;opacity:1!important}
@@ -226,29 +275,52 @@ html[data-theme="dark"] input[type="radio"]{accent-color:#38bdf8!important}
 /* 4) Exemptions: buttons, badges, headings, nav keep their own crisp colours */
 html[data-theme="dark"] .cbi-button,
 html[data-theme="dark"] .btn,
+html[data-theme="dark"] button:not(#rgb-theme-toggle),
+html[data-theme="dark"] input[type="button"],
+html[data-theme="dark"] input[type="submit"],
+html[data-theme="dark"] input[type="reset"]{
+  background:#1e293b!important;
+  color:#f8fafc!important;
+  border:1px solid rgba(148,163,184,.40)!important;
+}
 html[data-theme="dark"] ul.nav>li>a,
 html[data-theme="dark"] .tabs>li>a,
 html[data-theme="dark"] #tabmenu ul.tabs>li>a{color:#fff!important}
 html[data-theme="dark"] .cbi-button-apply,
 html[data-theme="dark"] .cbi-button-action,
 html[data-theme="dark"] .cbi-button-positive,
-html[data-theme="dark"] .btn.primary{color:#03131a!important}
+html[data-theme="dark"] .btn.primary,
+html[data-theme="dark"] input.cbi-button-apply,
+html[data-theme="dark"] input.cbi-button-save{
+  background:linear-gradient(90deg,#00c896,#22d3ee)!important;
+  color:#03131a!important;
+  border-color:transparent!important;
+}
+html[data-theme="dark"] .cbi-button-remove,
+html[data-theme="dark"] .cbi-button-negative,
+html[data-theme="dark"] .cbi-button-reset{
+  background:linear-gradient(90deg,#ff2d6f,#f97316)!important;
+  color:#ffffff!important;
+  border-color:transparent!important;
+}
 html[data-theme="dark"] .ifacebadge,
 html[data-theme="dark"] .zonebadge,
 html[data-theme="dark"] .badge,
 html[data-theme="dark"] .label,
 html[data-theme="dark"] .status,
 html[data-theme="dark"] .cbi-progressbar>div{color:#fff!important}
+html[data-theme="dark"] h1,
 html[data-theme="dark"] h2,
 html[data-theme="dark"] h3,
 html[data-theme="dark"] h4,
+html[data-theme="dark"] legend,
 html[data-theme="dark"] .ginfo-title strong,
 html[data-theme="dark"] .cbi-section-title{
-  background:linear-gradient(90deg,#ff4d8d,#ffd166,#7cff6b,#38bdf8,#a78bfa,#ff4d8d)!important;
-  background-size:300% 100%!important;
-  -webkit-background-clip:text!important;background-clip:text!important;
-  -webkit-text-fill-color:transparent!important;color:transparent!important;
-  animation:rgbFlow 8s linear infinite;font-weight:900!important;
+  background:none!important;
+  -webkit-text-fill-color:#f8fafc!important;
+  color:#f8fafc!important;
+  text-shadow:0 0 12px rgba(56,189,248,.35)!important;
+  font-weight:900!important;
 }
 html[data-theme="dark"] #modemenu li a{color:#38bdf8!important}
 html[data-theme="dark"] .cbi-progressbar>div{
@@ -455,6 +527,19 @@ html[data-theme="light"] .ginfo-dashboard .cbi-progressbar>div{
 .alert-message.error{
   background:linear-gradient(90deg,rgba(255,45,111,.28),rgba(239,68,68,.22))!important;
   border-color:#ff2d6f!important;color:#9f1239!important;
+}
+html[data-theme="dark"] .alert-message.success,
+html[data-theme="dark"] .alert-message.notice{
+  background:linear-gradient(90deg,rgba(6,95,70,.65),rgba(14,116,144,.55))!important;
+  border-color:#34d399!important;color:#ecfdf5!important;
+}
+html[data-theme="dark"] .alert-message.warning{
+  background:linear-gradient(90deg,rgba(146,64,14,.68),rgba(154,52,18,.58))!important;
+  border-color:#fbbf24!important;color:#fef3c7!important;
+}
+html[data-theme="dark"] .alert-message.error{
+  background:linear-gradient(90deg,rgba(159,18,57,.72),rgba(153,27,27,.62))!important;
+  border-color:#fb7185!important;color:#ffe4e6!important;
 }
 #modemenu li a{font-weight:750!important}
 

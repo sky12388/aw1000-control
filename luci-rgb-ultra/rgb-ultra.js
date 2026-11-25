@@ -114,9 +114,11 @@
     if (!el.textContent || !el.textContent.trim() || !ownText(el)) return;
     var fg = parseColor(getComputedStyle(el).color);
     if (!fg || fg[3] < 0.5) return;
-    if (contrast(fg, backgroundOf(el)) >= 3.2) return;
-    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
-    el.style.setProperty('color', dark ? '#f8fafc' : '#0f172a', 'important');
+    var bg = backgroundOf(el);
+    if (contrast(fg, bg) >= 4.2) return;
+    // Choose high-contrast foreground based on the ACTUAL rendered background luminance
+    var bgIsLight = luminance(bg) > 0.42;
+    el.style.setProperty('color', bgIsLight ? '#0f172a' : '#f8fafc', 'important');
     el.setAttribute(MARK, '1');
   }
 
