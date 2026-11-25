@@ -142,9 +142,9 @@ case "$1" in
 		case "$2" in
 			status)
 				json_init
-				nb_ip=$(ip -4 addr show dev wt0 2>/dev/null | awk '/inet / {print $2}' | head -n1)
-				ts_ip=$(ip -4 addr show dev tailscale0 2>/dev/null | awk '/inet / {print $2}' | head -n1)
-				wan_ip=$(ip -4 addr show dev ccmni2 2>/dev/null | awk '/inet / {print $2}' | head -n1)
+				nb_ip=""; [ -d /sys/class/net/wt0 ] && nb_ip=$(ip -4 addr show dev wt0 2>/dev/null | awk '/inet / {print $2}' | head -n1)
+				ts_ip=""; [ -d /sys/class/net/tailscale0 ] && ts_ip=$(ip -4 addr show dev tailscale0 2>/dev/null | awk '/inet / {print $2}' | head -n1)
+				wan_ip=""; [ -d /sys/class/net/ccmni2 ] && wan_ip=$(ip -4 addr show dev ccmni2 2>/dev/null | awk '/inet / {print $2}' | head -n1)
 				json_add_string "wt0_ip" "${nb_ip:-offline}"
 				json_add_string "tailscale_ip" "${ts_ip:-offline}"
 				json_add_string "ccmni2_ip" "${wan_ip:-offline}"
