@@ -358,18 +358,81 @@ html[data-theme="dark"] .ginfo-dashboard .cbi-progressbar>div{
   background:linear-gradient(90deg,#00e5a8,#38bdf8,#7c3aed,#ff2d6f)!important;
 }
 
-/* 6) Bootstrap leftovers that still force light surfaces (inline / own class) */
-html[data-theme="dark"] .cbi-tabmenu li.cbi-tab,
-html[data-theme="dark"] .cbi-tabmenu li.cbi-tab a{
-  background:#1a2138!important;color:#f1f5f9!important;border-color:#475569!important;
+/* 6) Exhaustive Bootstrap cascade.css dark-mode overrides (zero white-on-white surfaces) */
+html[data-theme="dark"] .cbi-tabmenu,
+html[data-theme="dark"] .tabs{
+  background:transparent!important;background-image:none!important;
+  border-bottom:1px solid rgba(148,163,184,.28)!important;
 }
-html[data-theme="dark"] .cbi-tabmenu li.cbi-tab.active,
-html[data-theme="dark"] .cbi-tabmenu li.cbi-tab.active a{
+html[data-theme="dark"] .cbi-tabmenu > li,
+html[data-theme="dark"] .cbi-tabmenu > li.cbi-tab-disabled,
+html[data-theme="dark"] .cbi-tabmenu > li.cbi-tab-disabled > a,
+html[data-theme="dark"] .cbi-tabmenu > li > a{
+  background:#1a2138!important;background-image:none!important;
+  color:#cbd5e1!important;border-color:#475569!important;
+  text-shadow:none!important;
+}
+html[data-theme="dark"] .cbi-tabmenu > li:hover,
+html[data-theme="dark"] .cbi-tabmenu > li.cbi-tab-disabled:hover,
+html[data-theme="dark"] .cbi-tabmenu > li.cbi-tab-disabled:hover > a{
+  background:#243154!important;background-image:none!important;
+  color:#ffffff!important;
+}
+html[data-theme="dark"] .cbi-tabmenu > li.cbi-tab,
+html[data-theme="dark"] .cbi-tabmenu > li.cbi-tab > a,
+html[data-theme="dark"] .cbi-tabmenu > li.active,
+html[data-theme="dark"] .cbi-tabmenu > li.active > a{
   background:linear-gradient(90deg,#ff2d6f,#7c3aed,#22d3ee)!important;
-  color:#fff!important;border-color:transparent!important;
+  color:#ffffff!important;border-color:transparent!important;font-weight:850!important;
+}
+html[data-theme="dark"] .uneditable-input,
+html[data-theme="dark"] input[disabled],
+html[data-theme="dark"] select[disabled],
+html[data-theme="dark"] textarea[disabled],
+html[data-theme="dark"] input[readonly],
+html[data-theme="dark"] select[readonly],
+html[data-theme="dark"] textarea[readonly]{
+  background:#0f172a!important;background-color:#0f172a!important;
+  color:#94a3b8!important;border-color:#334155!important;
+}
+html[data-theme="dark"] .actions,
+html[data-theme="dark"] .breadcrumb,
+html[data-theme="dark"] .menu-dropdown,
+html[data-theme="dark"] .tr.table-titles,
+html[data-theme="dark"] .tr.cbi-section-table-titles,
+html[data-theme="dark"] .cbi-progressbar,
+html[data-theme="dark"] .cbi-filebrowser,
+html[data-theme="dark"] .cbi-filebrowser > ul > li{
+  background:#131829!important;background-image:none!important;
+  color:#f1f5f9!important;border-color:#475569!important;
+}
+html[data-theme="dark"] .cbi-filebrowser > ul > li:hover,
+html[data-theme="dark"] .cbi-section-table .tr:hover .td,
+html[data-theme="dark"] .cbi-section-table .tr:hover .th{
+  background:#243154!important;color:#ffffff!important;
+}
+html[data-theme="dark"] .cbi-section-error{
+  background:rgba(159,18,57,.72)!important;color:#ffe4e6!important;border-color:#fb7185!important;
+}
+html[data-theme="dark"] .uci-change-list del,
+html[data-theme="dark"] .uci-change-legend-label del{
+  background:rgba(153,27,27,.7)!important;color:#fecaca!important;border-color:#f87171!important;
+}
+html[data-theme="dark"] .uci-change-list ins,
+html[data-theme="dark"] .uci-change-legend-label ins{
+  background:rgba(6,95,70,.7)!important;color:#a7f3d0!important;border-color:#34d399!important;
+}
+html[data-theme="dark"] .uci-change-list var,
+html[data-theme="dark"] .uci-change-legend-label var{
+  background:#1e293b!important;color:#e2e8f0!important;border-color:#475569!important;
 }
 html[data-theme="dark"] .cbi-tooltip{
-  background:#1a2138!important;color:#f1f5f9!important;border:1px solid #475569!important;
+  background:#1a2138!important;background-image:none!important;
+  color:#f1f5f9!important;border:1px solid #475569!important;text-shadow:none!important;
+}
+html[data-theme="dark"] .cbi-page-actions .cbi-button-apply + .cbi-button-save,
+html[data-theme="dark"] .cbi-page-actions .cbi-button-negative + .cbi-button-save{
+  background:linear-gradient(90deg,#00c896,#22d3ee)!important;color:#03131a!important;text-shadow:none!important;
 }
 html[data-theme="dark"] .ifacebox,
 html[data-theme="dark"] .ifacebox-body,
@@ -382,10 +445,13 @@ html[data-theme="dark"] #indicators span,
 html[data-theme="dark"] #indicators .badge{
   background:#1a2138!important;color:#38bdf8!important;border:1px solid #475569!important;
 }
+html[data-theme="dark"] .cbi-dropdown:not(.btn):not(.cbi-button),
 html[data-theme="dark"] .cbi-dropdown ul,
+html[data-theme="dark"] .cbi-dropdown[open] > ul.dropdown,
 html[data-theme="dark"] .cbi-dropdown .dropdown-menu,
 html[data-theme="dark"] .cbi-dropdown .dropdown{
-  background:#1a2138!important;color:#f1f5f9!important;border-color:#475569!important;
+  background:#0f172a!important;background-image:none!important;
+  color:#f8fafc!important;border-color:#475569!important;
 }
 /* dynlist / dropdown option rows (e.g. NTP servers on System) */
 html[data-theme="dark"] .cbi-dynlist .item,
@@ -395,7 +461,11 @@ html[data-theme="dark"] .cbi-dynlist .item>label,
 html[data-theme="dark"] .cbi-dynlist .item>strong,
 html[data-theme="dark"] .cbi-dropdown .item,
 html[data-theme="dark"] .cbi-multi-select .item{
-  background:#1a2138!important;color:#f1f5f9!important;border:1px solid #475569!important;
+  background:#1a2138!important;background-image:none!important;
+  color:#f1f5f9!important;border:1px solid #475569!important;
+}
+html[data-theme="dark"] .cbi-dynlist .item::after{
+  background:#243154!important;color:#fb7185!important;border-color:#475569!important;
 }
 html[data-theme="dark"] .cbi-dynlist .item:hover,
 html[data-theme="dark"] .cbi-dropdown .item:hover{background:#243154!important}
