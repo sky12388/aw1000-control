@@ -1948,7 +1948,7 @@ function renderSystemScreen() {
       <footer class="card" style="grid-column: 1 / -1; padding:14px 18px; background:var(--bg-subtle); border:1px solid var(--border-subtle);">
         <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px;">
           <p class="card-subtitle" style="margin:0; font-size:0.80rem; line-height:1.55; word-break:normal;">
-            <span class="mono" style="color:var(--text-wifi); font-weight:700;">HTTP 200 OK</span> · Engineered under a bridge in KL by <strong>Eddie Alexander (Sky Walker Consortium)</strong> so your 5G bars stay 100% bright green. If your speed hits 500 Mbps, buy the dev a Teh Tarik!
+            <span class="mono" style="color:var(--text-wifi); font-weight:700;">AW1000_5G_ULTRA</span> · <strong>Developed by Skywalker</strong> (Eddie Alexander · Sky Walker Consortium). Built so your 5G bars stay sharp &amp; true. If your speed flies, buy the dev a Teh Tarik!
           </p>
           <div style="display:flex; gap:8px; flex-wrap:wrap; shrink:0;">
             <a class="icon-btn" href="https://github.com/sky12388/aw1000-control" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">
@@ -2706,8 +2706,8 @@ export function render() {
         <div class="brand-lockup">
           <div class="brand-mark">${ICONS.signal5g}</div>
           <div>
-            <div class="brand-title">AW1000 Control</div>
-            <div class="brand-sub">Ultra 5G · OpenWrt PWA</div>
+            <div class="brand-title">AW1000_5G_ULTRA</div>
+            <div class="brand-sub">Developed by Skywalker · 5G PWA</div>
           </div>
         </div>
 

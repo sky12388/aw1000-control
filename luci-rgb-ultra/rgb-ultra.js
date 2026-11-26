@@ -250,12 +250,37 @@
     applySortAndFilter();
   }
 
+  function mountSkywalkerBranding() {
+    if (!document.getElementById('rgb-skywalker-footer')) {
+      var foot = document.createElement('div');
+      foot.id = 'rgb-skywalker-footer';
+      foot.className = 'rgb-skywalker-footer';
+      foot.innerHTML = '<span>AW1000_5G_ULTRA</span><span>·</span><strong>Developed by Skywalker</strong>';
+      var footerEl = document.querySelector('footer');
+      if (footerEl) footerEl.appendChild(foot);
+      else if (document.body) document.body.appendChild(foot);
+    }
+    var pwInput = document.querySelector('input[name="luci_password"]');
+    if (pwInput && !document.getElementById('rgb-skywalker-login')) {
+      var form = pwInput.closest('form') || pwInput.parentElement;
+      if (form) {
+        var badge = document.createElement('div');
+        badge.id = 'rgb-skywalker-login';
+        badge.className = 'rgb-skywalker-login';
+        badge.innerHTML = '<span>AW1000_5G_ULTRA</span><span>·</span><strong>Developed by Skywalker</strong>';
+        form.insertBefore(badge, form.firstChild);
+      }
+    }
+  }
+
   document.addEventListener('DOMContentLoaded', function () {
     mountThemeToggle();
+    mountSkywalkerBranding();
     enhanceStartupTable();
     scan(document);
     var observer = new MutationObserver(function (records) {
       enhanceStartupTable();
+      mountSkywalkerBranding();
       for (var i = 0; i < records.length; i++) {
         var target = records[i].target;
         if (target && target.nodeType === 1 && target.hasAttribute(MARK)) continue;
