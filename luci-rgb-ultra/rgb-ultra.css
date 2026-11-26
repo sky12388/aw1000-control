@@ -813,11 +813,20 @@ html[data-theme="dark"] .rgb-skywalker-login{
   border:1px solid rgba(56,189,248,.35);color:#e2e8f0!important;
 }
 html[data-theme="dark"] .rgb-skywalker-footer strong,
-html[data-theme="dark"] .rgb-skywalker-login strong{color:#38bdf8!important}
+html[data-theme="dark"] .rgb-skywalker-login strong,
+html[data-theme="dark"] .rgb-skywalker-footer a,
+html[data-theme="dark"] .rgb-skywalker-login a{color:#38bdf8!important;text-decoration:none!important}
 html[data-theme="light"] .rgb-skywalker-footer,
 html[data-theme="light"] .rgb-skywalker-login{
   background:linear-gradient(90deg,#e0f2fe,#ede9fe);
   border:1px solid #93c5fd;color:#0f172a!important;
 }
 html[data-theme="light"] .rgb-skywalker-footer strong,
-html[data-theme="light"] .rgb-skywalker-login strong{color:#1d4ed8!important}
+html[data-theme="light"] .rgb-skywalker-login strong,
+html[data-theme="light"] .rgb-skywalker-footer a,
+html[data-theme="light"] .rgb-skywalker-login a{color:#1d4ed8!important;text-decoration:none!important}
+.rgb-apk-badge{
+  display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:5px;
+  font-size:11.5px;font-weight:700;border:1px solid currentColor;opacity:.92;
+}
+.rgb-apk-badge:hover{opacity:1;text-decoration:underline!important}

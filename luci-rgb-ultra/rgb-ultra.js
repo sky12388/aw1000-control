@@ -251,11 +251,15 @@
   }
 
   function mountSkywalkerBranding() {
+    var URL = 'https://sky12388.github.io/aw1000-control/';
+    var HTML = '<span>AW1000_5G_ULTRA</span><span>·</span>'
+      + '<a href="' + URL + '" target="_blank" rel="noopener noreferrer"><strong>Developed by Skywalker</strong></a>'
+      + '<a class="rgb-apk-badge" href="' + URL + '" target="_blank" rel="noopener noreferrer">Download Android APK ↗</a>';
     if (!document.getElementById('rgb-skywalker-footer')) {
       var foot = document.createElement('div');
       foot.id = 'rgb-skywalker-footer';
       foot.className = 'rgb-skywalker-footer';
-      foot.innerHTML = '<span>AW1000_5G_ULTRA</span><span>·</span><strong>Developed by Skywalker</strong>';
+      foot.innerHTML = HTML;
       var footerEl = document.querySelector('footer');
       if (footerEl) footerEl.appendChild(foot);
       else if (document.body) document.body.appendChild(foot);
@@ -267,7 +271,7 @@
         var badge = document.createElement('div');
         badge.id = 'rgb-skywalker-login';
         badge.className = 'rgb-skywalker-login';
-        badge.innerHTML = '<span>AW1000_5G_ULTRA</span><span>·</span><strong>Developed by Skywalker</strong>';
+        badge.innerHTML = HTML;
         form.insertBefore(badge, form.firstChild);
       }
     }

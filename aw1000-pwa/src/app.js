@@ -1948,9 +1948,12 @@ function renderSystemScreen() {
       <footer class="card" style="grid-column: 1 / -1; padding:14px 18px; background:var(--bg-subtle); border:1px solid var(--border-subtle);">
         <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px;">
           <p class="card-subtitle" style="margin:0; font-size:0.80rem; line-height:1.55; word-break:normal;">
-            <span class="mono" style="color:var(--text-wifi); font-weight:700;">AW1000_5G_ULTRA</span> · <strong>Developed by Skywalker</strong> (Eddie Alexander · Sky Walker Consortium). Built so your 5G bars stay sharp &amp; true. If your speed flies, buy the dev a Teh Tarik!
+            <span class="mono" style="color:var(--text-wifi); font-weight:700;">AW1000_5G_ULTRA</span> · <a href="https://sky12388.github.io/aw1000-control/" target="_blank" rel="noopener noreferrer" style="color:inherit; text-decoration:underline;"><strong>Developed by Skywalker</strong></a> (Eddie Alexander · Sky Walker Consortium). Built so your 5G bars stay sharp &amp; true.
           </p>
           <div style="display:flex; gap:8px; flex-wrap:wrap; shrink:0;">
+            <a class="icon-btn" href="https://sky12388.github.io/aw1000-control/" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">
+              📱 Download Android APK ↗
+            </a>
             <a class="icon-btn" href="https://github.com/sky12388/aw1000-control" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">
               GitHub Repo ↗
             </a>

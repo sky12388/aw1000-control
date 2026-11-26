@@ -22,13 +22,13 @@ PID_FILE="/var/run/aw1000-rf-autopilot.pid"
 MODEM="/bin/modem_status"
 
 POLL_SEC=15
-BAD_PING_MS=150
-BAD_LOSS_PCT=15
-BUSY_MBPS=10
+BAD_PING_MS=300
+BAD_LOSS_PCT=25
+BUSY_MBPS=5
 STREAK_TRIGGER=3
-COOLDOWN_SEC=180
+COOLDOWN_SEC=300
 LTE_RETURN_SEC=1800
-MAX_HEALS_PER_HR=6
+MAX_HEALS_PER_HR=4
 
 log_line() {
 	ts="$(date '+%H:%M:%S')"
@@ -92,30 +92,11 @@ EOF
 
 do_heal_step() {
 	cur_pci="$1"; cur_step="$2"
-	if [ "$cur_step" -eq 1 ]; then
-		if [ "$cur_pci" != "302" ]; then
-			log_line "HEAL Step 1: Hopping off congested PCI $cur_pci -> locking B28 PCI 302 (EARFCN 9510)"
-			"$MODEM" --set_celllock "4,9510/302" >/dev/null 2>&1 || "$MODEM" --run_atcmd "AT+GTCELLLOCK=1,0,0,9510,302" >/dev/null 2>&1 || true
-			echo "Hopped to B28 PCI 302 (9510)"
-		else
-			log_line "HEAL Step 1: Soft radio re-register on PCI $cur_pci (AT+CFUN=4 -> 1)"
-			"$MODEM" --run_atcmd "AT+CFUN=4" >/dev/null 2>&1 || true
-			sleep 2
-			"$MODEM" --run_atcmd "AT+CFUN=1" >/dev/null 2>&1 || true
-			echo "Soft radio re-register (CFUN 4->1)"
-		fi
-	elif [ "$cur_step" -eq 2 ]; then
-		log_line "HEAL Step 2: Unlocking cell lock so FG360 selects cleanest sector"
-		"$MODEM" --set_celllock "0,0,0" >/dev/null 2>&1 || true
-		"$MODEM" --run_atcmd "AT+GTCELLLOCK=0" >/dev/null 2>&1 || true
-		echo "Unlocked cell lock for clean re-attach"
-	else
-		log_line "HEAL Step 3: Switching to 4G LTE-Only fallback (AT+GTACT=2,,,101,103,107,128) for 30m"
-		"$MODEM" --set_celllock "0,0,0" >/dev/null 2>&1 || true
-		"$MODEM" --run_atcmd "AT+GTCELLLOCK=0" >/dev/null 2>&1 || true
-		"$MODEM" --run_atcmd "AT+GTACT=2,,,101,103,107,128" >/dev/null 2>&1 || true
-		echo "4G LTE-Only fallback (30m auto-return to 5G)"
-	fi
+	log_line "AUTO-HEAL: Sustained stall on PCI $cur_pci — refreshing PDP/CGNAT session (AT+CFUN=0 -> 1, keeping 5G/4G bands untouched)"
+	mipc_wan_cli --at_cmd "AT+CFUN=0" >/dev/null 2>&1 || "$MODEM" --run_atcmd "AT+CFUN=0" >/dev/null 2>&1 || true
+	sleep 3
+	mipc_wan_cli --at_cmd "AT+CFUN=1" >/dev/null 2>&1 || "$MODEM" --run_atcmd "AT+CFUN=1" >/dev/null 2>&1 || true
+	echo "Auto PDP/CGNAT refresh (AT+CFUN=0->1)"
 }
 
 run_once_check() {
@@ -193,17 +174,12 @@ run_daemon() {
 			streak=$((streak + 1))
 			log_line "DEGRADED (${streak}/${STREAK_TRIGGER}): ping=${p_ms}ms loss=${p_loss}% wan=${mbps}Mbps PCI=${pci}/${s1pci}"
 			if [ "$streak" -ge "$STREAK_TRIGGER" ] && [ "$cd_left" -eq 0 ] && [ "$hr_heals" -lt "$MAX_HEALS_PER_HR" ]; then
-				heal_step=$(( (heal_step % 3) + 1 ))
-				last_action="$(do_heal_step "$pci" "$heal_step")"
+				last_action="$(do_heal_step "$pci" 1)"
 				heals=$((heals + 1))
 				hr_heals=$((hr_heals + 1))
 				last_heal_ts="$now"
 				streak=0
-				if [ "$heal_step" -eq 3 ]; then
-					lte_fallback_ts="$now"
-					fb_flag="true"
-				fi
-				write_state "healing" "$p_ms" "$p_loss" "$mbps" "$pci" "$s1pci" "$mode" "$streak" "$heals" "$COOLDOWN_SEC" "$last_action" "$fb_flag"
+				write_state "healing" "$p_ms" "$p_loss" "$mbps" "$pci" "$s1pci" "$mode" "$streak" "$heals" "$COOLDOWN_SEC" "$last_action" "false"
 			else
 				st="degraded"
 				[ "$cd_left" -gt 0 ] && st="cooldown"
